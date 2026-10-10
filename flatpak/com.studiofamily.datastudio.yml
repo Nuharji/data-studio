@@ -1,0 +1,33 @@
+# Flatpak manifest. Repackages the Linux .deb produced by `tauri build`
+# (the release workflow copies it to flatpak/app.deb before running flatpak-builder).
+id: com.studiofamily.datastudio
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: data-studio
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  - --share=network
+  - --filesystem=home
+modules:
+  - name: data-studio
+    buildsystem: simple
+    sources:
+      - type: file
+        path: app.deb
+    build-commands:
+      - ar -x app.deb
+      - tar -xf data.tar.*
+      - install -Dm755 usr/bin/data-studio /app/bin/data-studio
+      - |
+        desktop=$(ls usr/share/applications/*.desktop | head -n1)
+        sed -e 's/^Icon=.*/Icon=com.studiofamily.datastudio/' "$desktop" > com.studiofamily.datastudio.desktop
+        install -Dm644 com.studiofamily.datastudio.desktop /app/share/applications/com.studiofamily.datastudio.desktop
+      - |
+        for dir in usr/share/icons/hicolor/*/apps; do
+          size=$(basename "$(dirname "$dir")")
+          install -Dm644 "$dir/data-studio.png" "/app/share/icons/hicolor/$size/apps/com.studiofamily.datastudio.png"
+        done
