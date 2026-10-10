@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 — 2026-10-10
+- CSV, TSV, JSON, JSON Lines and old spreadsheets (.xls, .ods) are now read by the app's Rust core, and CSV / JSON / Markdown files are written there — faster with big files, less JavaScript.
+- Text files: UTF-8, UTF-16 and Windows-1252 (old Excel exports) are recognised; the separator (comma, semicolon, tab, pipe) is detected from the first lines.
+- .ods files keep their formulas (OpenDocument formulas are translated to Excel style), and .ods files saved by Data Studio itself open again reliably.
 ## 1.3.1 — 2026-10-10
 - The formatting tools (bold, colors, alignment, borders, number format …) are now in the tool rail on the left, like in Markdown Studio. Number formats open as a menu with an example for each format.
 

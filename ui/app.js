@@ -395,12 +395,6 @@ const nfLabel = code => code === 'General' ? t('nf.general') : code === '@' ? t(
 const SHEET_EXT = ['xlsx', 'xlsm', 'xls', 'ods'], TEXT_EXT = ['csv', 'tsv', 'tab', 'txt', 'json', 'jsonl', 'ndjson'];
 const extOf = name => (name.split('.').pop() || '').toLowerCase();
 function colName(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
-function decodeText(bytes) {
-  let bom = bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
-  const body = bom ? bytes.subarray(3) : bytes;
-  try { return {text: new TextDecoder('utf-8', {fatal: true}).decode(body), encoding: bom ? 'UTF-8 (BOM)' : 'UTF-8', bom}; }
-  catch (e) { return {text: new TextDecoder('windows-1252').decode(body), encoding: 'Windows-1252', bom: false}; }
-}
 /* excelRefs: formulas come from a spreadsheet file, where row 1 holds the column names — shift them so A1 is the first data row. */
 function makeSheet(name, aoa, header = true, excelRefs = false) {
   const width = Math.min(4000, aoa.reduce((m, r) => Math.max(m, r.length), 0)) || 1;
@@ -420,39 +414,6 @@ function makeSheet(name, aoa, header = true, excelRefs = false) {
     sel: {ar: 0, ac: 0, fr: 0, fc: 0}, scroll: {top: 0, left: 0}, chart: null};
   detectAll(sh); measureCols(sh); recompute(sh);
   return sh;
-}
-function flatten(o, prefix = '', out = {}, depth = 0) {
-  for (const [k, v] of Object.entries(o)) {
-    const key = prefix ? prefix + '.' + k : k;
-    if (v && typeof v === 'object' && !Array.isArray(v) && depth < 3) flatten(v, key, out, depth + 1);
-    else out[key] = Array.isArray(v) || (v && typeof v === 'object') ? JSON.stringify(v) : v;
-  }
-  return out;
-}
-function jsonToAoa(data) {
-  const isObj = x => x && typeof x === 'object' && !Array.isArray(x);
-  const objectsToAoa = list => {
-    const flat = list.map(o => flatten(o)), keys = [], seen = new Set();
-    for (const o of flat) for (const k of Object.keys(o)) if (!seen.has(k)) { seen.add(k); keys.push(k); if (keys.length >= 2000) break; }
-    return [keys, ...flat.map(o => keys.map(k => o[k] ?? ''))];
-  };
-  if (Array.isArray(data)) {
-    if (data.length && data.every(isObj)) return objectsToAoa(data);
-    if (data.length && data.every(Array.isArray)) return data.every((r, i) => i > 0 || r.every(v => typeof v === 'string')) ? data : [data[0].map((_, i) => colName(i)), ...data];
-    return [['value'], ...data.map(v => [isObj(v) || Array.isArray(v) ? JSON.stringify(v) : v])];
-  }
-  if (isObj(data)) {
-    const vals = Object.values(data);
-    if (vals.length && vals.every(Array.isArray) && vals.every(a => a.length === vals[0].length) && vals.every(a => a.every(v => !isObj(v)))) {
-      const keys = Object.keys(data);
-      return [keys, ...vals[0].map((_, i) => keys.map(k => data[k][i]))];
-    }
-    if (vals.length && vals.every(isObj)) return objectsToAoa(Object.entries(data).map(([k, v]) => ({key: k, ...v})));
-    const arrKey = Object.keys(data).find(k => Array.isArray(data[k]) && data[k].length && isObj(data[k][0]));
-    if (arrKey) return objectsToAoa(data[arrKey]);
-    return [['key', 'value'], ...Object.entries(flatten(data))];
-  }
-  return [['value'], [data]];
 }
 /* Excel workbooks are read in Rust (xlsx.rs) with their formatting: values, formulas, a style table, merged cells,
    column widths and row heights. Cell styles hang on the row arrays (row.fmt[col]), so they move with sorting, inserting and deleting. */
@@ -482,36 +443,12 @@ async function parseXlsx(bytes, ext) {
 async function parseFile(bytes, name) {
   const ext = extOf(name), base = name.replace(/\.[^.]+$/, '');
   if ((ext === 'xlsx' || ext === 'xlsm') && invoke) return parseXlsx(bytes, ext);
-  if (SHEET_EXT.includes(ext)) {
-    const wb = XLSX.read(bytes, {type: 'array', cellDates: true, cellFormula: true});
-    const sheets = wb.SheetNames.map(n => {
-      const ws = wb.Sheets[n], cells = Object.keys(ws).filter(k => k[0] !== '!');
-      const formulas = cells.filter(k => ws[k].f);
-      // With formulas, keep blank rows so row numbers (and so references) stay as in Excel.
-      const aoa = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: '', blankrows: formulas.length > 0});
-      if (formulas.length && ws['!ref']) {
-        const start = XLSX.utils.decode_range(ws['!ref']).s;
-        for (const k of formulas) {
-          const {r, c} = XLSX.utils.decode_cell(k);
-          (aoa[r - start.r] = aoa[r - start.r] || [])[c - start.c] = '=' + ws[k].f;
-        }
-      }
-      return makeSheet(n, aoa, true, true);
-    });
-    return {format: ext, sheets, encoding: '', delimiter: '', bom: false};
-  }
-  const {text, encoding, bom} = decodeText(bytes);
-  if (ext === 'json') {
-    try { return {format: 'json', sheets: [makeSheet(base, jsonToAoa(JSON.parse(text)))], encoding, bom, delimiter: ''}; }
-    catch (e) { if (!/^\s*\{/.test(text)) throw e; }   // maybe JSON Lines with a .json name
-  }
-  if (ext === 'json' || ext === 'jsonl' || ext === 'ndjson') {
-    const items = text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l));
-    return {format: 'jsonl', sheets: [makeSheet(base, jsonToAoa(items))], encoding, bom, delimiter: ''};
-  }
-  const res = Papa.parse(text, {delimiter: ext === 'tsv' || ext === 'tab' ? '\t' : '', skipEmptyLines: 'greedy'});
-  const delimiter = res.meta.delimiter || ',';
-  return {format: ext === 'tab' ? 'tsv' : ext, sheets: [makeSheet(base, res.data, true, true)], encoding, bom, delimiter};
+  // CSV / TSV (separator detected), JSON, JSON Lines and old spreadsheets (.xls, .ods) are read in Rust (table.rs).
+  const m = await invoke('table_read', bytes, {headers: {'x-name': encodeURIComponent(name)}});
+  const fromRust = v => v && typeof v === 'object' && '$date' in v ? XFormat.fromSerial(v.$date) : v;
+  const json = m.format === 'json' || m.format === 'jsonl';
+  const sheets = m.sheets.map(s => makeSheet(s.name || base, s.rows.map(r => r.map(fromRust)), true, !json));
+  return {format: m.format, sheets, encoding: m.encoding, bom: m.bom, delimiter: m.delimiter};
 }
 
 /* ================= File access (native or browser) ================= */
@@ -1363,23 +1300,14 @@ function serialize(d, fmt, onlyVisible, keepRaw) {
       if (fmt === 'csvSemi' && col.type === 'number' && (col.numStyle === 'en' || typeof v === 'number')) { const n = toNumber(v, 'en'); if (Number.isFinite(n)) return String(n).replace('.', ','); }
       return typeof v === 'number' ? String(+v.toPrecision(15)) : rawText(v);
     };
-    const aoa = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...idx.map(i => cols.map((_, c) => cell(i, c)))];
-    const bom = fmt === 'csvSemi' || (keepRaw && d.bom);
-    return (bom ? '﻿' : '') + Papa.unparse(aoa, {delimiter: delim, newline: '\r\n'});
+    const rows = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...idx.map(i => cols.map((_, c) => cell(i, c)))];
+    return tableWrite({format: 'csv', delimiter: delim, bom: fmt === 'csvSemi' || (keepRaw && !!d.bom), rows});
   }
   if (fmt === 'json' || fmt === 'jsonl') {
-    const objs = idx.map(i => Object.fromEntries(cols.map((c, ci) => {
-      const v = typed(value(sh, i, ci), c);
-      return [c.name, v instanceof Date ? isoDate(v) : v];
-    })));
-    return fmt === 'json' ? JSON.stringify(objs, null, 2) + '\n' : objs.map(o => JSON.stringify(o)).join('\n') + '\n';
+    const rows = idx.map(i => cols.map((c, ci) => { const v = typed(value(sh, i, ci), c); return v instanceof Date ? isoDate(v) : typeof v === 'number' && !Number.isFinite(v) ? null : v; }));
+    return tableWrite({format: fmt, columns: cols.map(c => c.name), rows});
   }
-  if (fmt === 'md') {
-    const cellMd = s => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
-    return [`| ${cols.map(c => cellMd(c.name)).join(' | ')} |`,
-      `|${cols.map(c => c.type === 'number' ? '---:' : ':---').join('|')}|`,
-      ...idx.map(i => `| ${cols.map((_, c) => cellMd(displayCell(sh, i, c))).join(' | ')} |`)].join('\n') + '\n';
-  }
+  if (fmt === 'md') return tableWrite({format: 'md', columns: cols.map(c => c.name), numeric: cols.map(c => c.type === 'number'), rows: idx.map(i => cols.map((_, c) => displayCell(sh, i, c)))});
   if ((fmt === 'xlsx' || fmt === 'xlsm') && invoke) return writeXlsx(d, onlyVisible, value);
   if (fmt === 'xlsx' || SHEET_EXT.includes(fmt)) {
     const wb = XLSX.utils.book_new();
@@ -1436,6 +1364,8 @@ async function writeXlsx(d, onlyVisible, value) {
   const original = d.path && ['xlsx', 'xlsm'].includes(extOf(d.path)) ? d.path : null;
   return new Uint8Array(await invoke('xlsx_write', {req: {original, token: d.xtoken || null, sheets}}));
 }
+/* CSV / JSON / JSON Lines / Markdown files are encoded in Rust (table.rs): quoting, separators, BOM, line endings. */
+async function tableWrite(req) { return new Uint8Array(await invoke('table_write', {req})); }
 const toBytes = out => typeof out === 'string' ? new TextEncoder().encode(out) : out;
 /* Saves in the file's own format (CSV keeps its separator and text exactly). */
 async function save() {

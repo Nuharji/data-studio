@@ -1,6 +1,7 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod table;
 mod xlsx;
 
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,10 @@ fn is_data(path: &Path) -> bool {
 /// Header values are percent-encoded by the UI so non-ASCII paths survive.
 fn header(req: &Request, key: &str) -> Option<String> {
     let raw = req.headers().get(key)?.to_str().ok()?;
+    Some(percent_decode(raw)).filter(|s| !s.is_empty())
+}
+
+pub fn percent_decode(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -78,7 +83,7 @@ fn header(req: &Request, key: &str) -> Option<String> {
         out.push(bytes[i]);
         i += 1;
     }
-    Some(String::from_utf8_lossy(&out).into_owned()).filter(|s| !s.is_empty())
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[tauri::command]
@@ -236,6 +241,8 @@ fn main() {
             confirm,
             open_url,
             initial_files,
+            table::table_read,
+            table::table_write,
             xlsx::xlsx_read,
             xlsx::xlsx_write,
             xlsx::xlsx_forget
