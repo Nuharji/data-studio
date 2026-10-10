@@ -1,0 +1,1541 @@
+'use strict';
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const grid = $('#grid'), gInner = $('#gInner');
+// Native backend (Rust/Tauri). Null when the UI is opened directly in a browser.
+const invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const STORE = 'data-studio.v1';
+const HEAD_H = 30, FILT_H = 28;
+const PALETTE = ['#12A06B', '#378EF0', '#E5384F', '#F08A1C', '#7B4DFF', '#22B8B0', '#C2410C', '#FF6B5A'];
+
+/* ================= Translations ================= */
+const I18N = {
+  en: {
+    'menu.file': 'File', 'menu.edit': 'Edit', 'menu.data': 'Data', 'menu.view': 'View', 'menu.settings': 'Settings', 'menu.help': 'Help',
+    'menu.language': 'Language', 'menu.theme': 'Theme',
+    'a.openFile': 'Open…', 'a.newTable': 'New Table', 'a.save': 'Save', 'a.saveAs': 'Save As…', 'a.exportAs': 'Export…', 'a.closeTab': 'Close Tab',
+    'a.undo': 'Undo', 'a.redo': 'Redo', 'a.copy': 'Copy', 'a.selectAll': 'Select All', 'a.editCell': 'Edit Cell', 'a.clearCells': 'Clear Cells',
+    'a.find': 'Search Rows', 'a.insertRow': 'Insert Row Below', 'a.deleteRows': 'Delete Rows', 'a.insertCol': 'Insert Column Right',
+    'a.deleteCol': 'Delete Columns', 'a.renameCol': 'Rename Column…', 'a.sortAsc': 'Sort Ascending', 'a.sortDesc': 'Sort Descending',
+    'a.clearView': 'Clear Sort and Filters', 'a.toggleFilters': 'Column Filters', 'a.toggleHeader': 'First Row Is Header',
+    'a.viewTable': 'Table Only', 'a.viewSplit': 'Table and Chart', 'a.viewChart': 'Chart Only', 'a.togglePanels': 'Panels',
+    'a.toggleCompact': 'Compact Rows', 'a.exportChart': 'Save Chart as PNG…', 'a.settings': 'Preferences…',
+    'a.langAuto': 'System language', 'a.langEn': 'English', 'a.langDe': 'Deutsch',
+    'a.themeDark': 'Dark', 'a.themeLight': 'Light', 'a.themeGithub': 'GitHub', 'a.themeGithubDark': 'GitHub Dark',
+    'a.shortcuts': 'Keyboard Shortcuts', 'a.about': 'About Data Studio',
+    'theme.dark': 'Dark', 'theme.light': 'Light', 'theme.github': 'GitHub', 'theme.github-dark': 'GitHub Dark',
+    'ui.save': 'Save', 'ui.searchRows': 'Search all rows…', 'ui.column': 'Column', 'ui.chart': 'Chart', 'ui.properties': 'Properties',
+    'ui.table': 'Table', 'ui.split': 'Split', 'ui.saveChart': 'Save PNG',
+    'ui.emptyTitle': 'Open a data file to get started',
+    'ui.emptyHint': 'CSV, TSV, JSON, JSON Lines or Excel. Drop files here or use File → Open (Ctrl+O).',
+    'ui.recent': 'Recent files', 'ui.drop': 'Drop data files to open them', 'ui.openTip': 'Open file',
+    'ui.rows': '{n} rows', 'ui.rowsFiltered': '{n} of {total} rows', 'ui.cols': '{n} columns', 'ui.cell': 'Row {r} · {c}',
+    'ui.selStats': 'Count {n}', 'ui.selSum': 'Sum {v}', 'ui.selAvg': 'Average {v}',
+    'ui.noColumn': 'Click a cell or column header to see statistics for that column.', 'ui.noRows': 'No rows match the current search and filters.',
+    'ui.type': 'Type', 'ui.values': 'Values', 'ui.empty': 'Empty', 'ui.unique': 'Unique', 'ui.min': 'Minimum', 'ui.max': 'Maximum',
+    'ui.sum': 'Sum', 'ui.mean': 'Average', 'ui.median': 'Median', 'ui.top': 'Most common', 'ui.earliest': 'Earliest', 'ui.latest': 'Latest',
+    'ui.shownRows': 'Based on the {n} rows shown.',
+    'type.number': 'Number', 'type.text': 'Text', 'type.date': 'Date', 'type.bool': 'Yes/No',
+    'tshort.number': '123', 'tshort.text': 'Abc', 'tshort.date': 'Date', 'tshort.bool': 'Y/N',
+    'ui.file': 'File', 'ui.format': 'Format', 'ui.delimiter': 'Separator', 'ui.encoding': 'Encoding', 'ui.sheets': 'Sheets',
+    'ui.size': 'File size', 'ui.path': 'Location', 'ui.headerRow': 'First row contains column names', 'ui.table2': 'Table',
+    'delim.,': 'Comma', 'delim.;': 'Semicolon', 'delim.\t': 'Tab', 'delim.|': 'Pipe',
+    'ui.chartType': 'Chart type', 'chart.bar': 'Bar', 'chart.line': 'Line', 'chart.pie': 'Pie', 'chart.scatter': 'Scatter',
+    'ui.xCol': 'Categories (X axis)', 'ui.yCols': 'Values (Y axis)', 'ui.agg': 'Combine equal categories',
+    'agg.none': 'Don’t combine', 'agg.sum': 'Sum', 'agg.avg': 'Average', 'agg.count': 'Count rows', 'ui.limit': 'Show at most',
+    'ui.chartNeedNumber': 'Pick at least one number column for the values in the Chart panel.', 'ui.byX': 'by {x}',
+    'ui.exportTitle': 'Export', 'ui.saveAsTitle': 'Save As', 'ui.onlyVisible': 'Only the rows shown (current search, filters and sort)',
+    'ui.export': 'Export', 'ui.cancel': 'Cancel', 'ui.ok': 'OK', 'ui.renameTitle': 'Rename column', 'ui.newColName': 'Column {n}',
+    'ui.untitled': 'Untitled', 'ui.sortTip': 'Sort — click to switch between ascending, descending and off', 'ui.filterPh': 'Filter…',
+    'ui.filterHelp': 'Text to find, or for numbers: >10, <5, 10..20, =3. Start with ! to exclude.', 'ui.notSaved': 'Unsaved changes',
+    'fmt.csv': 'CSV (comma)', 'fmt.csvD': 'Works in almost every app', 'fmt.csvSemi': 'CSV for Excel (semicolon)',
+    'fmt.csvSemiD': 'Opens correctly in German Excel', 'fmt.tsv': 'TSV (tab)', 'fmt.tsvD': 'Easy to paste anywhere',
+    'fmt.json': 'JSON', 'fmt.jsonD': 'List of objects', 'fmt.jsonl': 'JSON Lines', 'fmt.jsonlD': 'One object per line',
+    'fmt.xlsx': 'Excel workbook', 'fmt.xlsxD': '.xlsx with all sheets', 'fmt.md': 'Markdown table', 'fmt.mdD': 'For Markdown Studio',
+    'st.dirty': 'Unsaved changes', 'st.saved': 'Saved',
+    'toast.saved': 'Saved {name}', 'toast.exported': 'Exported {name}', 'toast.openFail': 'Could not open {name}: {e}',
+    'toast.saveFail': 'Save failed: {e}', 'toast.skipped': 'Skipped {name} (unsupported file type)', 'toast.missing': 'File not found: {name}',
+    'toast.copied': 'Copied {n} cells', 'toast.pasted': 'Pasted {n} cells', 'toast.lastCol': 'A table needs at least one column.',
+    'toast.linkFail': 'Could not open link: {e}', 'toast.tooBig': 'Copy is limited to 1,000,000 cells.',
+    'confirm.title': 'Unsaved changes', 'confirm.close': '“{name}” has unsaved changes. Close it anyway?',
+    'confirm.quit': 'Some files have unsaved changes. Quit anyway?', 'confirm.ok': 'Close anyway', 'confirm.quitOk': 'Quit anyway',
+    'confirm.cancel': 'Cancel',
+    'set.title': 'Settings', 'set.general': 'General', 'set.appearance': 'Appearance', 'set.table': 'Table',
+    'set.language': 'Language', 'set.languageHint': 'Language of menus, panels and messages.', 'set.layout': 'Layout',
+    'set.panels': 'Show panels on the right', 'set.reopen': 'Reopen the files from last time on start', 'set.theme': 'Theme',
+    'set.compact': 'Compact rows (fit more on screen)', 'set.numbers': 'Show numbers', 'set.numRaw': 'Exactly as in the file',
+    'set.numLocal': 'Formatted for my language (1,234.5 / 1.234,5)', 'set.reset': 'Reset to defaults', 'set.done': 'Done',
+    'set.resetDone': 'Settings reset to defaults',
+    'about.p1': '<b>Data Studio</b> is part of the Studio family: view, filter, sort, chart, edit and convert CSV, JSON and Excel files.',
+    'about.p2': 'Built with Rust (Tauri), <a href="https://sheetjs.com">SheetJS</a>, <a href="https://www.papaparse.com">Papa Parse</a> and <a href="https://www.chartjs.org">Chart.js</a>.',
+    'about.p3': 'Everything runs on your computer; files are never uploaded.', 'about.version': 'Version {v}',
+    'sc.grid': 'In the table', 'sc.move': 'Move', 'sc.moveKey': 'Arrow keys, Tab, Page Up/Down', 'sc.extend': 'Extend selection',
+    'sc.extendKey': 'Shift + arrows or click', 'sc.edit': 'Edit a cell', 'sc.editKey': 'Type, F2 or double-click',
+    'sc.paste': 'Paste from Excel', 'sc.pasteKey': 'Ctrl+V', 'sc.width': 'Column width', 'sc.widthKey': 'Drag the header edge',
+    'ctx.closeOthers': 'Close Other Tabs', 'ctx.cut': 'Cut', 'ctx.paste': 'Paste', 'ctx.filterValue': 'Show Only “{v}”', 'ctx.emptyValue': '(empty)'
+  },
+  de: {
+    'menu.file': 'Datei', 'menu.edit': 'Bearbeiten', 'menu.data': 'Daten', 'menu.view': 'Ansicht', 'menu.settings': 'Einstellungen', 'menu.help': 'Hilfe',
+    'menu.language': 'Sprache', 'menu.theme': 'Design',
+    'a.openFile': 'Öffnen…', 'a.newTable': 'Neue Tabelle', 'a.save': 'Speichern', 'a.saveAs': 'Speichern unter…', 'a.exportAs': 'Exportieren…',
+    'a.closeTab': 'Tab schließen', 'a.undo': 'Rückgängig', 'a.redo': 'Wiederholen', 'a.copy': 'Kopieren', 'a.selectAll': 'Alles auswählen',
+    'a.editCell': 'Zelle bearbeiten', 'a.clearCells': 'Zellen leeren', 'a.find': 'Zeilen durchsuchen', 'a.insertRow': 'Zeile darunter einfügen',
+    'a.deleteRows': 'Zeilen löschen', 'a.insertCol': 'Spalte rechts einfügen', 'a.deleteCol': 'Spalten löschen', 'a.renameCol': 'Spalte umbenennen…',
+    'a.sortAsc': 'Aufsteigend sortieren', 'a.sortDesc': 'Absteigend sortieren', 'a.clearView': 'Sortierung und Filter zurücksetzen',
+    'a.toggleFilters': 'Spaltenfilter', 'a.toggleHeader': 'Erste Zeile ist Kopfzeile',
+    'a.viewTable': 'Nur Tabelle', 'a.viewSplit': 'Tabelle und Diagramm', 'a.viewChart': 'Nur Diagramm', 'a.togglePanels': 'Bedienfelder',
+    'a.toggleCompact': 'Kompakte Zeilen', 'a.exportChart': 'Diagramm als PNG speichern…', 'a.settings': 'Einstellungen…',
+    'a.langAuto': 'Systemsprache', 'a.langEn': 'English', 'a.langDe': 'Deutsch',
+    'a.themeDark': 'Dunkel', 'a.themeLight': 'Hell', 'a.themeGithub': 'GitHub', 'a.themeGithubDark': 'GitHub Dunkel',
+    'a.shortcuts': 'Tastenkürzel', 'a.about': 'Über Data Studio',
+    'theme.dark': 'Dunkel', 'theme.light': 'Hell', 'theme.github': 'GitHub', 'theme.github-dark': 'GitHub Dunkel',
+    'ui.save': 'Speichern', 'ui.searchRows': 'Alle Zeilen durchsuchen…', 'ui.column': 'Spalte', 'ui.chart': 'Diagramm',
+    'ui.properties': 'Eigenschaften', 'ui.table': 'Tabelle', 'ui.split': 'Geteilt', 'ui.saveChart': 'PNG speichern',
+    'ui.emptyTitle': 'Öffne eine Datendatei, um loszulegen',
+    'ui.emptyHint': 'CSV, TSV, JSON, JSON Lines oder Excel. Dateien hier ablegen oder Datei → Öffnen (Strg+O) verwenden.',
+    'ui.recent': 'Zuletzt geöffnet', 'ui.drop': 'Datendateien hier ablegen, um sie zu öffnen', 'ui.openTip': 'Datei öffnen',
+    'ui.rows': '{n} Zeilen', 'ui.rowsFiltered': '{n} von {total} Zeilen', 'ui.cols': '{n} Spalten', 'ui.cell': 'Zeile {r} · {c}',
+    'ui.selStats': 'Anzahl {n}', 'ui.selSum': 'Summe {v}', 'ui.selAvg': 'Mittelwert {v}',
+    'ui.noColumn': 'Klicke auf eine Zelle oder einen Spaltenkopf, um die Statistik dieser Spalte zu sehen.',
+    'ui.noRows': 'Keine Zeile passt zur aktuellen Suche und den Filtern.',
+    'ui.type': 'Typ', 'ui.values': 'Werte', 'ui.empty': 'Leer', 'ui.unique': 'Eindeutig', 'ui.min': 'Minimum', 'ui.max': 'Maximum',
+    'ui.sum': 'Summe', 'ui.mean': 'Mittelwert', 'ui.median': 'Median', 'ui.top': 'Häufigste Werte', 'ui.earliest': 'Frühestes',
+    'ui.latest': 'Spätestes', 'ui.shownRows': 'Bezogen auf die {n} angezeigten Zeilen.',
+    'type.number': 'Zahl', 'type.text': 'Text', 'type.date': 'Datum', 'type.bool': 'Ja/Nein',
+    'tshort.number': '123', 'tshort.text': 'Abc', 'tshort.date': 'Datum', 'tshort.bool': 'J/N',
+    'ui.file': 'Datei', 'ui.format': 'Format', 'ui.delimiter': 'Trennzeichen', 'ui.encoding': 'Kodierung', 'ui.sheets': 'Tabellenblätter',
+    'ui.size': 'Dateigröße', 'ui.path': 'Speicherort', 'ui.headerRow': 'Erste Zeile enthält die Spaltennamen', 'ui.table2': 'Tabelle',
+    'delim.,': 'Komma', 'delim.;': 'Semikolon', 'delim.\t': 'Tabulator', 'delim.|': 'Senkrechter Strich',
+    'ui.chartType': 'Diagrammtyp', 'chart.bar': 'Balken', 'chart.line': 'Linie', 'chart.pie': 'Kreis', 'chart.scatter': 'Punkte',
+    'ui.xCol': 'Kategorien (X-Achse)', 'ui.yCols': 'Werte (Y-Achse)', 'ui.agg': 'Gleiche Kategorien zusammenfassen',
+    'agg.none': 'Nicht zusammenfassen', 'agg.sum': 'Summe', 'agg.avg': 'Mittelwert', 'agg.count': 'Zeilen zählen', 'ui.limit': 'Höchstens anzeigen',
+    'ui.chartNeedNumber': 'Wähle im Diagramm-Bedienfeld mindestens eine Zahlenspalte für die Werte.', 'ui.byX': 'nach {x}',
+    'ui.exportTitle': 'Exportieren', 'ui.saveAsTitle': 'Speichern unter', 'ui.onlyVisible': 'Nur die angezeigten Zeilen (aktuelle Suche, Filter und Sortierung)',
+    'ui.export': 'Exportieren', 'ui.cancel': 'Abbrechen', 'ui.ok': 'OK', 'ui.renameTitle': 'Spalte umbenennen', 'ui.newColName': 'Spalte {n}',
+    'ui.untitled': 'Unbenannt', 'ui.sortTip': 'Sortieren – Klick wechselt zwischen aufsteigend, absteigend und aus', 'ui.filterPh': 'Filter…',
+    'ui.filterHelp': 'Gesuchter Text, oder bei Zahlen: >10, <5, 10..20, =3. Mit ! am Anfang ausschließen.',
+    'ui.notSaved': 'Ungespeicherte Änderungen',
+    'fmt.csv': 'CSV (Komma)', 'fmt.csvD': 'Funktioniert in fast jeder App', 'fmt.csvSemi': 'CSV für Excel (Semikolon)',
+    'fmt.csvSemiD': 'Öffnet korrekt im deutschen Excel', 'fmt.tsv': 'TSV (Tabulator)', 'fmt.tsvD': 'Lässt sich überall einfügen',
+    'fmt.json': 'JSON', 'fmt.jsonD': 'Liste von Objekten', 'fmt.jsonl': 'JSON Lines', 'fmt.jsonlD': 'Ein Objekt pro Zeile',
+    'fmt.xlsx': 'Excel-Arbeitsmappe', 'fmt.xlsxD': '.xlsx mit allen Blättern', 'fmt.md': 'Markdown-Tabelle', 'fmt.mdD': 'Für Markdown Studio',
+    'st.dirty': 'Ungespeicherte Änderungen', 'st.saved': 'Gespeichert',
+    'toast.saved': '{name} gespeichert', 'toast.exported': '{name} exportiert', 'toast.openFail': '{name} konnte nicht geöffnet werden: {e}',
+    'toast.saveFail': 'Speichern fehlgeschlagen: {e}', 'toast.skipped': '{name} übersprungen (Dateityp nicht unterstützt)',
+    'toast.missing': 'Datei nicht gefunden: {name}', 'toast.copied': '{n} Zellen kopiert', 'toast.pasted': '{n} Zellen eingefügt',
+    'toast.lastCol': 'Eine Tabelle braucht mindestens eine Spalte.', 'toast.linkFail': 'Link konnte nicht geöffnet werden: {e}',
+    'toast.tooBig': 'Kopieren ist auf 1.000.000 Zellen begrenzt.',
+    'confirm.title': 'Ungespeicherte Änderungen', 'confirm.close': '„{name}“ hat ungespeicherte Änderungen. Trotzdem schließen?',
+    'confirm.quit': 'Einige Dateien haben ungespeicherte Änderungen. Trotzdem beenden?', 'confirm.ok': 'Trotzdem schließen',
+    'confirm.quitOk': 'Trotzdem beenden', 'confirm.cancel': 'Abbrechen',
+    'set.title': 'Einstellungen', 'set.general': 'Allgemein', 'set.appearance': 'Darstellung', 'set.table': 'Tabelle',
+    'set.language': 'Sprache', 'set.languageHint': 'Sprache der Menüs, Bedienfelder und Meldungen.', 'set.layout': 'Layout',
+    'set.panels': 'Bedienfelder rechts anzeigen', 'set.reopen': 'Beim Start die zuletzt geöffneten Dateien wieder öffnen', 'set.theme': 'Design',
+    'set.compact': 'Kompakte Zeilen (mehr auf einen Blick)', 'set.numbers': 'Zahlen anzeigen', 'set.numRaw': 'Genau wie in der Datei',
+    'set.numLocal': 'Für meine Sprache formatiert (1.234,5)', 'set.reset': 'Auf Standard zurücksetzen', 'set.done': 'Fertig',
+    'set.resetDone': 'Einstellungen zurückgesetzt',
+    'about.p1': '<b>Data Studio</b> gehört zur Studio-Familie: CSV-, JSON- und Excel-Dateien ansehen, filtern, sortieren, als Diagramm darstellen, bearbeiten und umwandeln.',
+    'about.p2': 'Gebaut mit Rust (Tauri), <a href="https://sheetjs.com">SheetJS</a>, <a href="https://www.papaparse.com">Papa Parse</a> und <a href="https://www.chartjs.org">Chart.js</a>.',
+    'about.p3': 'Alles läuft auf deinem Computer; Dateien werden nie hochgeladen.', 'about.version': 'Version {v}',
+    'sc.grid': 'In der Tabelle', 'sc.move': 'Bewegen', 'sc.moveKey': 'Pfeiltasten, Tab, Bild auf/ab', 'sc.extend': 'Auswahl erweitern',
+    'sc.extendKey': 'Umschalt + Pfeile oder Klick', 'sc.edit': 'Zelle bearbeiten', 'sc.editKey': 'Lostippen, F2 oder Doppelklick',
+    'sc.paste': 'Aus Excel einfügen', 'sc.pasteKey': 'Strg+V', 'sc.width': 'Spaltenbreite', 'sc.widthKey': 'Kante im Spaltenkopf ziehen',
+    'ctx.closeOthers': 'Andere Tabs schließen', 'ctx.cut': 'Ausschneiden', 'ctx.paste': 'Einfügen', 'ctx.filterValue': 'Nur „{v}“ anzeigen',
+    'ctx.emptyValue': '(leer)'
+  }
+};
+let lang = 'en';
+function t(key, vars) {
+  let s = I18N[lang][key] ?? I18N.en[key] ?? key;
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
+  return s;
+}
+const fmtKey = k => lang === 'de' ? k.replace(/Ctrl/g, 'Strg').replace(/Shift/g, 'Umschalt').replace(/Delete/g, 'Entf')
+  .replace(/ArrowUp/g, '↑').replace(/ArrowDown/g, '↓').replace(/Enter/g, 'Eingabe') : k.replace(/ArrowUp/g, '↑').replace(/ArrowDown/g, '↓');
+const num = n => n.toLocaleString(lang, {maximumFractionDigits: 4});
+const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumFractionDigits: 1}) + ' MB'
+  : Math.max(1, Math.round(b / 1024)).toLocaleString(lang) + ' KB';
+
+/* ================= Settings & state ================= */
+const THEMES = ['dark', 'light', 'github', 'github-dark'];
+const DEF = {lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table'};
+let settings = {...DEF}, recent = [], docs = [], active = -1, booted = false, docSeq = 0;
+const cur = () => docs[active];
+const sheet = () => cur() && cur().sheets[cur().si];
+const effectiveLang = () => settings.lang === 'auto'
+  ? ((navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en') : settings.lang;
+function saveState() {
+  try { localStorage.setItem(STORE, JSON.stringify({settings, recent, open: docs.filter(d => d.path).map(d => d.path), active: cur() && cur().path})); }
+  catch (e) {}
+}
+function addRecent(path, name) {
+  if (!path) return;
+  recent = [{path, name}, ...recent.filter(r => r.path !== path)].slice(0, 10);
+}
+
+/* ================= Values: numbers, dates, display ================= */
+const NUM_EN = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+const NUM_DE = /^[+-]?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$/;
+const DATE_ISO = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+const DATE_DE = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?: (\d{1,2}):(\d{2}))?$/;
+const BOOL = /^(true|false|yes|no|ja|nein|wahr|falsch)$/i;
+const isEmpty = v => v === null || v === undefined || v === '';
+function toNumber(v, style = 'en') {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'boolean' || v instanceof Date || typeof v !== 'string') return NaN;
+  const s = v.trim();
+  if (!s || s === '-' || s === '+' || s === '.') return NaN;
+  if (style === 'de') return NUM_DE.test(s) ? +s.replace(/\./g, '').replace(',', '.') : NaN;
+  return NUM_EN.test(s) ? +s.replace(/,/g, '') : NaN;
+}
+function toTime(v) {
+  if (v instanceof Date) return v.getTime();
+  if (typeof v !== 'string') return NaN;
+  const s = v.trim();
+  if (DATE_ISO.test(s)) return Date.parse(s.length === 10 ? s + 'T00:00:00' : s.replace(' ', 'T'));
+  const m = DATE_DE.exec(s);
+  return m ? new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)).getTime() : NaN;
+}
+const pad2 = n => String(n).padStart(2, '0');
+function isoDate(d) {
+  const day = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return d.getHours() || d.getMinutes() || d.getSeconds() ? `${day} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : day;
+}
+function rawText(v) {
+  if (isEmpty(v)) return '';
+  if (v instanceof Date) return isoDate(v);
+  return String(v);
+}
+function display(v, col) {
+  if (isEmpty(v)) return '';
+  if (v instanceof Date) return settings.numLocal ? v.toLocaleDateString(lang) : isoDate(v);
+  if (settings.numLocal && col.type === 'number') {
+    const n = toNumber(v, col.numStyle);
+    if (Number.isFinite(n)) return n.toLocaleString(lang, {maximumFractionDigits: 10});
+  }
+  const s = String(v);
+  return s.length > 400 ? s.slice(0, 400) + '…' : s;
+}
+/* Column type: sampled, so huge files stay fast. */
+function detectType(sh, c) {
+  const col = sh.cols[c], n = sh.rows.length, step = Math.max(1, Math.floor(n / 3000));
+  const vals = [];
+  for (let i = 0; i < n && vals.length < 3000; i += step) { const v = sh.rows[i][c]; if (!isEmpty(v)) vals.push(v); }
+  col.numStyle = 'en';
+  if (!vals.length) { col.type = 'text'; return; }
+  if (vals.every(v => typeof v === 'number')) { col.type = 'number'; return; }
+  if (vals.every(v => v instanceof Date)) { col.type = 'date'; return; }
+  if (vals.every(v => typeof v === 'boolean' || (typeof v === 'string' && BOOL.test(v.trim())))) { col.type = 'bool'; return; }
+  const strs = vals.every(v => typeof v === 'string' || typeof v === 'number');
+  if (strs && vals.every(v => Number.isFinite(toNumber(v, 'en')))) { col.type = 'number'; return; }
+  if (strs && vals.every(v => Number.isFinite(toNumber(v, 'de')))) { col.type = 'number'; col.numStyle = 'de'; return; }
+  if (vals.every(v => Number.isFinite(toTime(v)))) { col.type = 'date'; return; }
+  col.type = 'text';
+}
+const detectAll = sh => sh.cols.forEach((_, c) => detectType(sh, c));
+function sortKey(v, col) {
+  if (isEmpty(v)) return null;
+  if (col.type === 'number') { const n = toNumber(v, col.numStyle); return Number.isFinite(n) ? n : rawText(v).toLowerCase(); }
+  if (col.type === 'date') { const n = toTime(v); return Number.isFinite(n) ? n : rawText(v).toLowerCase(); }
+  return rawText(v);
+}
+const collator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
+function cmpKeys(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (typeof a === 'number') return -1;
+  if (typeof b === 'number') return 1;
+  return collator.compare(a, b);
+}
+
+/* ================= Reading files ================= */
+const SHEET_EXT = ['xlsx', 'xlsm', 'xls', 'ods'], TEXT_EXT = ['csv', 'tsv', 'tab', 'txt', 'json', 'jsonl', 'ndjson'];
+const extOf = name => (name.split('.').pop() || '').toLowerCase();
+function colName(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+function decodeText(bytes) {
+  let bom = bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+  const body = bom ? bytes.subarray(3) : bytes;
+  try { return {text: new TextDecoder('utf-8', {fatal: true}).decode(body), encoding: bom ? 'UTF-8 (BOM)' : 'UTF-8', bom}; }
+  catch (e) { return {text: new TextDecoder('windows-1252').decode(body), encoding: 'Windows-1252', bom: false}; }
+}
+function makeSheet(name, aoa, header = true) {
+  const width = Math.min(4000, aoa.reduce((m, r) => Math.max(m, r.length), 0)) || 1;
+  const pad = r => { const out = r.slice(0, width); while (out.length < width) out.push(''); return out.map(v => v === null || v === undefined ? '' : v); };
+  let names, rows;
+  if (header && aoa.length) { names = pad(aoa[0]).map(rawText); rows = aoa.slice(1).map(pad); }
+  else { names = []; rows = aoa.map(pad); }
+  const seen = new Map();
+  const cols = Array.from({length: width}, (_, i) => {
+    let n = (names[i] || '').trim() || colName(i);
+    if (seen.has(n)) { let k = 2; while (seen.has(`${n} (${k})`)) k++; n = `${n} (${k})`; }
+    seen.set(n, 1);
+    return {name: n, type: 'text', numStyle: 'en', width: 120};
+  });
+  const sh = {name, header, cols, rows, view: [], sort: {c: -1, dir: 0}, filters: {}, query: '',
+    sel: {ar: 0, ac: 0, fr: 0, fc: 0}, scroll: {top: 0, left: 0}, chart: null};
+  detectAll(sh); measureCols(sh); recompute(sh);
+  return sh;
+}
+function flatten(o, prefix = '', out = {}, depth = 0) {
+  for (const [k, v] of Object.entries(o)) {
+    const key = prefix ? prefix + '.' + k : k;
+    if (v && typeof v === 'object' && !Array.isArray(v) && depth < 3) flatten(v, key, out, depth + 1);
+    else out[key] = Array.isArray(v) || (v && typeof v === 'object') ? JSON.stringify(v) : v;
+  }
+  return out;
+}
+function jsonToAoa(data) {
+  const isObj = x => x && typeof x === 'object' && !Array.isArray(x);
+  const objectsToAoa = list => {
+    const flat = list.map(o => flatten(o)), keys = [], seen = new Set();
+    for (const o of flat) for (const k of Object.keys(o)) if (!seen.has(k)) { seen.add(k); keys.push(k); if (keys.length >= 2000) break; }
+    return [keys, ...flat.map(o => keys.map(k => o[k] ?? ''))];
+  };
+  if (Array.isArray(data)) {
+    if (data.length && data.every(isObj)) return objectsToAoa(data);
+    if (data.length && data.every(Array.isArray)) return data.every((r, i) => i > 0 || r.every(v => typeof v === 'string')) ? data : [data[0].map((_, i) => colName(i)), ...data];
+    return [['value'], ...data.map(v => [isObj(v) || Array.isArray(v) ? JSON.stringify(v) : v])];
+  }
+  if (isObj(data)) {
+    const vals = Object.values(data);
+    if (vals.length && vals.every(Array.isArray) && vals.every(a => a.length === vals[0].length) && vals.every(a => a.every(v => !isObj(v)))) {
+      const keys = Object.keys(data);
+      return [keys, ...vals[0].map((_, i) => keys.map(k => data[k][i]))];
+    }
+    if (vals.length && vals.every(isObj)) return objectsToAoa(Object.entries(data).map(([k, v]) => ({key: k, ...v})));
+    const arrKey = Object.keys(data).find(k => Array.isArray(data[k]) && data[k].length && isObj(data[k][0]));
+    if (arrKey) return objectsToAoa(data[arrKey]);
+    return [['key', 'value'], ...Object.entries(flatten(data))];
+  }
+  return [['value'], [data]];
+}
+function parseFile(bytes, name) {
+  const ext = extOf(name), base = name.replace(/\.[^.]+$/, '');
+  if (SHEET_EXT.includes(ext)) {
+    const wb = XLSX.read(bytes, {type: 'array', cellDates: true});
+    const sheets = wb.SheetNames.map(n => makeSheet(n, XLSX.utils.sheet_to_json(wb.Sheets[n], {header: 1, raw: true, defval: '', blankrows: false})));
+    return {format: ext, sheets, encoding: '', delimiter: '', bom: false};
+  }
+  const {text, encoding, bom} = decodeText(bytes);
+  if (ext === 'json') {
+    try { return {format: 'json', sheets: [makeSheet(base, jsonToAoa(JSON.parse(text)))], encoding, bom, delimiter: ''}; }
+    catch (e) { if (!/^\s*\{/.test(text)) throw e; }   // maybe JSON Lines with a .json name
+  }
+  if (ext === 'json' || ext === 'jsonl' || ext === 'ndjson') {
+    const items = text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l));
+    return {format: 'jsonl', sheets: [makeSheet(base, jsonToAoa(items))], encoding, bom, delimiter: ''};
+  }
+  const res = Papa.parse(text, {delimiter: ext === 'tsv' || ext === 'tab' ? '\t' : '', skipEmptyLines: 'greedy'});
+  const delimiter = res.meta.delimiter || ',';
+  return {format: ext === 'tab' ? 'tsv' : ext, sheets: [makeSheet(base, res.data)], encoding, bom, delimiter};
+}
+
+/* ================= File access (native or browser) ================= */
+const enc = s => encodeURIComponent(s || '');
+async function readPath(path) { return new Uint8Array(await invoke('read_file', {path})); }
+async function writeBytes(bytes, {path = null, name, filter, ext}) {
+  if (invoke) return invoke('save_binary', bytes, {headers: {'x-path': enc(path), 'x-name': enc(name), 'x-filter': enc(filter), 'x-ext': enc(ext)}});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes])); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  return {path: null, name};
+}
+async function pickFiles() {
+  if (invoke) return invoke('pick_files', {filterName: lang === 'de' ? 'Datendateien' : 'Data files'});
+  return new Promise(res => {
+    const inp = $('#fileIn');
+    inp.accept = [...TEXT_EXT, ...SHEET_EXT].map(e => '.' + e).join(',');
+    inp.onchange = async () => {
+      const out = [];
+      for (const f of inp.files) out.push({name: f.name, size: f.size, path: null, bytes: new Uint8Array(await f.arrayBuffer())});
+      inp.value = ''; res(out);
+    };
+    inp.click();
+  });
+}
+
+/* ================= Documents & tabs ================= */
+async function openFileInfo(f) {
+  if (f.path) { const i = docs.findIndex(d => d.path === f.path); if (i >= 0) return activate(i); }
+  if (![...TEXT_EXT, ...SHEET_EXT].includes(extOf(f.name))) return toast(t('toast.skipped', {name: f.name}));
+  let bytes;
+  try { bytes = f.bytes || await readPath(f.path); } catch (e) { return toast(t('toast.missing', {name: f.name})); }
+  let parsed;
+  try { parsed = parseFile(bytes, f.name); } catch (e) { return toast(t('toast.openFail', {name: f.name, e: e.message || e})); }
+  docs.push({id: ++docSeq, name: f.name, path: f.path || null, size: f.size || bytes.length, ...parsed, si: 0,
+    dirty: false, history: [], future: [], cleanDepth: 0});
+  addRecent(f.path, f.name);
+  activate(docs.length - 1);
+}
+async function openFiles(list) { for (const f of list) await openFileInfo(f); }
+let untitledN = 1;
+function newTable() {
+  const cols = 5, rows = Array.from({length: 20}, () => Array(cols).fill(''));
+  const sh = makeSheet(t('ui.table2'), [Array.from({length: cols}, (_, i) => colName(i)), ...rows]);
+  docs.push({id: ++docSeq, name: `${t('ui.untitled')}-${untitledN++}.csv`, path: null, size: 0, format: 'csv', delimiter: ',', bom: false,
+    encoding: 'UTF-8', sheets: [sh], si: 0, dirty: false, history: [], future: [], cleanDepth: 0, isNew: true});
+  activate(docs.length - 1);
+}
+function activate(i) {
+  const prev = sheet();
+  if (prev) prev.scroll = {top: grid.scrollTop, left: grid.scrollLeft};
+  stopEdit(true);
+  active = i;
+  const d = cur();
+  $('#emptyState').hidden = !!d; $('#work').hidden = !d;
+  $('#globalSearch').value = d ? sheet().query : '';
+  if (d) { refresh(); grid.scrollTop = sheet().scroll.top; grid.scrollLeft = sheet().scroll.left; renderGrid(); grid.focus({preventScroll: true}); }
+  else { renderRecent(); updateUI(); buildPanels(); }
+  renderTabs(); syncDisabled(); saveState();
+}
+async function closeTab(i) {
+  const d = docs[i];
+  if (d.dirty && !await ask(t('confirm.close', {name: d.name}), t('confirm.ok'))) return;
+  docs.splice(i, 1);
+  let next = active;
+  if (i < active) next--; else if (i === active) next = Math.min(active, docs.length - 1);
+  active = -1;
+  activate(next);
+}
+function renderTabs() {
+  const box = $('#tabs'); box.innerHTML = '';
+  docs.forEach((d, i) => {
+    const el = document.createElement('div');
+    el.className = 'tab' + (i === active ? ' active' : '') + (d.dirty ? ' dirty' : '');
+    el.title = (d.path || d.name) + (d.dirty ? ' — ' + t('ui.notSaved') : '');
+    el.innerHTML = `<span class="tab-ico">${esc(d.format === 'jsonl' ? 'JSONL' : d.format)}</span><span class="name">${esc(d.name)}</span><button class="x" title="${esc(t('a.closeTab'))} (Alt+W)">&#10005;</button>`;
+    el.onmousedown = e => { if (e.button === 1) { e.preventDefault(); closeTab(i); } };
+    el.onclick = e => e.target.closest('.x') ? closeTab(i) : (i !== active && activate(i));
+    box.append(el);
+  });
+  const plus = document.createElement('button');
+  plus.className = 'tab-new'; plus.title = `${t('ui.openTip')} (Ctrl+O)`; plus.textContent = '+';
+  plus.onclick = () => A.openFile();
+  box.append(plus);
+}
+function renderRecent() {
+  $('#recent').innerHTML = recent.length ? `<div class="sect">${esc(t('ui.recent'))}</div>` + recent.map((r, i) =>
+    `<button data-recent="${i}"><span class="tab-ico">${esc(extOf(r.name))}</span><span>${esc(r.name)}</span><small>${esc(r.path)}</small></button>`).join('') : '';
+}
+$('#recent').addEventListener('click', e => {
+  const b = e.target.closest('[data-recent]'); if (!b) return;
+  const r = recent[+b.dataset.recent];
+  openFileInfo({path: r.path, name: r.name}).then(() => { if (!docs.some(d => d.path === r.path)) { recent = recent.filter(x => x !== r); renderRecent(); saveState(); } });
+});
+function renderSheets() {
+  const d = cur(), box = $('#sheets');
+  box.hidden = !d || d.sheets.length < 2;
+  if (box.hidden) return;
+  box.innerHTML = d.sheets.map((s, i) => `<button data-sheet="${i}" class="${i === d.si ? 'active' : ''}">${esc(s.name)}</button>`).join('');
+}
+$('#sheets').addEventListener('click', e => {
+  const b = e.target.closest('[data-sheet]'); if (!b) return;
+  const d = cur(); sheet().scroll = {top: grid.scrollTop, left: grid.scrollLeft};
+  stopEdit(true); d.si = +b.dataset.sheet;
+  $('#globalSearch').value = sheet().query;
+  refresh(); grid.scrollTop = sheet().scroll.top; grid.scrollLeft = sheet().scroll.left; renderGrid();
+});
+
+/* ================= Filtering & sorting ================= */
+function makeFilter(sh, c, expr) {
+  let s = expr.trim(), neg = false;
+  if (s.startsWith('!')) { neg = true; s = s.slice(1).trim(); }
+  const col = sh.cols[c], numeric = col.type === 'number' || col.type === 'date';
+  const val = v => col.type === 'date' ? toTime(v) : toNumber(v, col.numStyle);
+  const parse = x => col.type === 'date' ? toTime(x.trim()) : (Number.isFinite(toNumber(x.trim(), col.numStyle)) ? toNumber(x.trim(), col.numStyle) : toNumber(x.trim(), 'en'));
+  let test;
+  let m;
+  if (numeric && (m = /^(>=|<=|>|<|=)\s*(.+)$/.exec(s)) && Number.isFinite(parse(m[2]))) {
+    const x = parse(m[2]), op = m[1];
+    test = v => { const n = val(v); return Number.isFinite(n) && (op === '>' ? n > x : op === '<' ? n < x : op === '>=' ? n >= x : op === '<=' ? n <= x : n === x); };
+  } else if (numeric && (m = /^(.+?)\s*\.\.\s*(.+)$/.exec(s)) && Number.isFinite(parse(m[1])) && Number.isFinite(parse(m[2]))) {
+    const a = parse(m[1]), b = parse(m[2]);
+    test = v => { const n = val(v); return Number.isFinite(n) && n >= a && n <= b; };
+  } else if (s.startsWith('=')) {
+    const x = s.slice(1).trim().toLowerCase();
+    test = v => rawText(v).toLowerCase() === x;
+  } else {
+    const x = s.toLowerCase();
+    test = v => rawText(v).toLowerCase().includes(x);
+  }
+  return row => test(row[c]) !== neg;
+}
+function recompute(sh) {
+  const q = sh.query.trim().toLowerCase();
+  const fs = Object.entries(sh.filters).filter(([c, v]) => v && v.trim() && sh.cols[+c]).map(([c, v]) => makeFilter(sh, +c, v));
+  const idx = [];
+  for (let i = 0; i < sh.rows.length; i++) {
+    const row = sh.rows[i];
+    if (q && !row.some(v => !isEmpty(v) && rawText(v).toLowerCase().includes(q))) continue;
+    if (fs.length && !fs.every(f => f(row))) continue;
+    idx.push(i);
+  }
+  if (sh.sort.dir && sh.cols[sh.sort.c]) {
+    const c = sh.sort.c, col = sh.cols[c], dir = sh.sort.dir, keys = new Map();
+    for (const i of idx) keys.set(i, sortKey(sh.rows[i][c], col));
+    idx.sort((a, b) => {
+      const ka = keys.get(a), kb = keys.get(b);
+      if (ka === null) return kb === null ? a - b : 1;
+      if (kb === null) return -1;
+      return cmpKeys(ka, kb) * dir || a - b;
+    });
+  }
+  sh.view = idx;
+  const s = sh.sel, maxR = Math.max(0, idx.length - 1), maxC = sh.cols.length - 1;
+  s.ar = clamp(s.ar, 0, maxR); s.fr = clamp(s.fr, 0, maxR); s.ac = clamp(s.ac, 0, maxC); s.fc = clamp(s.fc, 0, maxC);
+}
+
+/* ================= Grid rendering (virtualized rows and columns) ================= */
+let measureCtx = null;
+function measureCols(sh) {
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
+  measureCtx.font = '12px "Segoe UI", system-ui, sans-serif';
+  const n = sh.rows.length, step = Math.max(1, Math.floor(n / 300));
+  sh.cols.forEach((col, c) => {
+    let w = measureCtx.measureText(col.name).width * 1.08 + 90;   // room for the type badge and sort button
+    for (let i = 0; i < n; i += step) w = Math.max(w, measureCtx.measureText(rawText(sh.rows[i][c]).slice(0, 80)).width + 22);
+    col.width = Math.round(clamp(w, 64, 380));
+  });
+}
+const rowH = () => settings.compact ? 22 : 26;
+const headH = () => HEAD_H + (settings.filters ? FILT_H : 0);
+let layoutCache = null;
+function layoutCols(sh) {
+  const xs = []; let x = 0;
+  sh.cols.forEach(c => { xs.push(x); x += c.width; });
+  const numW = Math.max(48, String(sh.rows.length).length * 8 + 26);
+  layoutCache = {xs, total: x, numW};
+  grid.style.setProperty('--numw', numW + 'px');
+  gInner.style.width = numW + x + 'px';
+  gInner.style.height = headH() + sh.view.length * rowH() + 'px';
+}
+const ARROWS = {
+  0: '<svg viewBox="0 0 24 24"><path d="M7 10l5-5 5 5M7 14l5 5 5-5"/></svg>',
+  1: '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  '-1': '<svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>'
+};
+function renderGrid() {
+  const sh = sheet(); if (!sh || !layoutCache) return;
+  const {xs, total, numW} = layoutCache, RH = rowH(), HH = headH(), s = sh.sel;
+  const top = grid.scrollTop, left = grid.scrollLeft, h = grid.clientHeight, w = grid.clientWidth;
+  const r0 = Math.max(0, Math.floor((top - HH) / RH) - 4), r1 = Math.min(sh.view.length, Math.ceil((top + h) / RH) + 4);
+  let c0 = 0; while (c0 < sh.cols.length - 1 && xs[c0] + sh.cols[c0].width < left - numW - 150) c0++;
+  let c1 = c0; while (c1 < sh.cols.length && xs[c1] < left + w + 150) c1++;
+  const pad = `<div style="width:${xs[c0] || 0}px;flex:none"></div>`;
+  const R0 = Math.min(s.ar, s.fr), R1 = Math.max(s.ar, s.fr), C0 = Math.min(s.ac, s.fc), C1 = Math.max(s.ac, s.fc);
+  const focusEl = document.activeElement, fCol = focusEl && focusEl.dataset && focusEl.dataset.f, fPos = fCol != null ? focusEl.selectionStart : 0;
+  let html = `<div class="g-head" style="width:${numW + total}px"><div class="g-hrow"><div class="g-corner"></div>${pad}`;
+  for (let c = c0; c < c1; c++) {
+    const col = sh.cols[c], sorted = sh.sort.c === c && sh.sort.dir;
+    html += `<div class="g-th${c >= C0 && c <= C1 ? ' sel' : ''}" data-c="${c}" style="width:${col.width}px" title="${esc(col.name)} — ${esc(t('type.' + col.type))}">` +
+      `<span class="tname">${esc(col.name)}</span><span class="ttype">${esc(t('tshort.' + col.type))}</span>` +
+      `<button class="tsort${sorted ? ' on' : ''}" data-sort="${c}" title="${esc(t('ui.sortTip'))}">${ARROWS[sorted ? sh.sort.dir : 0]}</button>` +
+      `<span class="resize" data-resize="${c}"></span></div>`;
+  }
+  html += '</div>';
+  if (settings.filters) {
+    html += `<div class="g-frow"><div class="g-corner"></div>${pad}`;
+    for (let c = c0; c < c1; c++) {
+      const v = sh.filters[c] || '';
+      html += `<div class="g-fcell" style="width:${sh.cols[c].width}px"><input data-f="${c}" value="${esc(v)}" class="${v ? 'on' : ''}" placeholder="${esc(t('ui.filterPh'))}" title="${esc(t('ui.filterHelp'))}" spellcheck="false"></div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  for (let r = r0; r < r1; r++) {
+    const row = sh.rows[sh.view[r]], rs = r >= R0 && r <= R1;
+    html += `<div class="g-row" style="top:${HH + r * RH}px;width:${numW + total}px;background:var(${r % 2 ? '--grid-alt' : '--grid-bg'})">` +
+      `<div class="g-num${rs ? ' sel' : ''}" data-r="${r}">${sh.view[r] + 1}</div>${pad}`;
+    for (let c = c0; c < c1; c++) {
+      const col = sh.cols[c], v = row[c];
+      const cls = 'g-cell' + (col.type === 'number' ? ' num' : '') + (rs && c >= C0 && c <= C1 ? ' sel' : '') + (r === s.fr && c === s.fc ? ' focus' : '');
+      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="width:${col.width}px">${esc(display(v, col))}</div>`;
+    }
+    html += '</div>';
+  }
+  if (!sh.view.length) html += `<div class="grid-empty" style="top:${HH + 40}px">${esc(t('ui.noRows'))}</div>`;
+  gInner.innerHTML = html;
+  if (fCol != null) { const inp = gInner.querySelector(`input[data-f="${fCol}"]`); if (inp) { inp.focus(); inp.setSelectionRange(fPos, fPos); } }
+}
+let gridRaf = 0;
+grid.addEventListener('scroll', () => { if (!gridRaf) gridRaf = requestAnimationFrame(() => { gridRaf = 0; renderGrid(); }); });
+window.addEventListener('resize', () => { renderGrid(); if (chart) chart.resize(); });
+
+/* Full refresh of the current sheet (after data, layout or setting changes). */
+function refresh(recalc = false) {
+  const sh = sheet(); if (!sh) return;
+  if (recalc) recompute(sh);
+  layoutCols(sh); renderGrid(); renderSheets(); buildPanels(); renderChart(); updateUI();
+}
+
+/* ================= Selection & navigation ================= */
+const selRange = s => ({r0: Math.min(s.ar, s.fr), r1: Math.max(s.ar, s.fr), c0: Math.min(s.ac, s.fc), c1: Math.max(s.ac, s.fc)});
+function setSel(r, c, extend = false) {
+  const sh = sheet(), s = sh.sel;
+  r = clamp(r, 0, Math.max(0, sh.view.length - 1)); c = clamp(c, 0, sh.cols.length - 1);
+  const colChanged = c !== s.fc;
+  s.fr = r; s.fc = c;
+  if (!extend) { s.ar = r; s.ac = c; }
+  ensureVisible(r, c); renderGrid(); updateUI();
+  if (colChanged || extend) buildColPanel();
+}
+function ensureVisible(r, c) {
+  const {xs, numW} = layoutCache, sh = sheet(), RH = rowH(), HH = headH();
+  const y = HH + r * RH;
+  if (y < grid.scrollTop + HH) grid.scrollTop = y - HH;
+  else if (y + RH > grid.scrollTop + grid.clientHeight) grid.scrollTop = y + RH - grid.clientHeight;
+  const x = xs[c], w = sh.cols[c].width;
+  if (x < grid.scrollLeft) grid.scrollLeft = x;
+  else if (numW + x + w > grid.scrollLeft + grid.clientWidth) grid.scrollLeft = numW + x + w - grid.clientWidth;
+}
+let dragSel = false;
+gInner.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  const sh = sheet(); if (!sh) return;
+  const cell = e.target.closest('.g-cell'), rnum = e.target.closest('.g-num'), th = e.target.closest('.g-th');
+  if (e.target.closest('[data-resize]')) return startResize(e, +e.target.dataset.resize);
+  if (e.target.closest('[data-sort]') || e.target.closest('input')) return;
+  stopEdit(true);
+  if (cell) { e.preventDefault(); grid.focus({preventScroll: true}); setSel(+cell.dataset.r, +cell.dataset.c, e.shiftKey); dragSel = 'cell'; }
+  else if (rnum) {
+    e.preventDefault(); grid.focus({preventScroll: true});
+    const r = +rnum.dataset.r, s = sh.sel;
+    if (!e.shiftKey) { s.ar = r; } s.fr = r; s.ac = 0; s.fc = sh.cols.length - 1;
+    renderGrid(); updateUI(); dragSel = 'row';
+  } else if (th) {
+    e.preventDefault(); grid.focus({preventScroll: true});
+    const c = +th.dataset.c, s = sh.sel;
+    if (!e.shiftKey) s.ac = c;
+    s.fc = c; s.ar = 0; s.fr = Math.max(0, sh.view.length - 1);
+    renderGrid(); updateUI(); buildColPanel(); dragSel = 'col';
+  }
+});
+gInner.addEventListener('mouseover', e => {
+  if (!dragSel || !(e.buttons & 1)) { dragSel = false; return; }
+  const s = sheet().sel;
+  const cell = e.target.closest('.g-cell'), rnum = e.target.closest('.g-num'), th = e.target.closest('.g-th');
+  if (dragSel === 'cell' && cell) { s.fr = +cell.dataset.r; s.fc = +cell.dataset.c; }
+  else if (dragSel === 'row' && (rnum || cell)) s.fr = +(rnum || cell).dataset.r;
+  else if (dragSel === 'col' && (th || cell)) s.fc = +(th || cell).dataset.c;
+  else return;
+  renderGrid(); updateUI();
+});
+window.addEventListener('mouseup', () => { dragSel = false; });
+gInner.addEventListener('dblclick', e => {
+  const cell = e.target.closest('.g-cell');
+  if (cell) return startEdit();
+  const th = e.target.closest('.g-th');
+  if (th && !e.target.closest('[data-sort],[data-resize]')) renameColumn(+th.dataset.c);
+});
+gInner.addEventListener('click', e => {
+  const b = e.target.closest('[data-sort]'); if (!b) return;
+  const sh = sheet(), c = +b.dataset.sort;
+  sh.sort = sh.sort.c === c ? {c, dir: sh.sort.dir === 1 ? -1 : sh.sort.dir === -1 ? 0 : 1} : {c, dir: 1};
+  refresh(true);
+});
+let filterT;
+gInner.addEventListener('input', e => {
+  const c = e.target.dataset.f; if (c == null) return;
+  sheet().filters[c] = e.target.value;
+  clearTimeout(filterT); filterT = setTimeout(() => refresh(true), 200);
+});
+$('#globalSearch').addEventListener('input', e => {
+  const sh = sheet(); if (!sh) return;
+  sh.query = e.target.value;
+  clearTimeout(filterT); filterT = setTimeout(() => refresh(true), 200);
+});
+$('#globalSearch').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); grid.focus(); } });
+function startResize(e, c) {
+  e.preventDefault(); e.stopPropagation();
+  const sh = sheet(), x0 = e.clientX, w0 = sh.cols[c].width;
+  const move = ev => { sh.cols[c].width = Math.max(40, Math.round(w0 + ev.clientX - x0)); layoutCols(sh); renderGrid(); };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', () => window.removeEventListener('mousemove', move), {once: true});
+}
+grid.addEventListener('keydown', e => {
+  if (e.target !== grid || !sheet()) return;
+  const sh = sheet(), s = sh.sel, page = Math.max(1, Math.floor((grid.clientHeight - headH()) / rowH()) - 1);
+  const move = (dr, dc) => { e.preventDefault(); setSel(s.fr + dr, s.fc + dc, e.shiftKey); };
+  const ctrl = e.ctrlKey || e.metaKey;
+  switch (e.key) {
+    case 'ArrowUp': return ctrl ? (e.preventDefault(), setSel(0, s.fc, e.shiftKey)) : move(-1, 0);
+    case 'ArrowDown': return ctrl ? (e.preventDefault(), setSel(sh.view.length - 1, s.fc, e.shiftKey)) : move(1, 0);
+    case 'ArrowLeft': return ctrl ? (e.preventDefault(), setSel(s.fr, 0, e.shiftKey)) : move(0, -1);
+    case 'ArrowRight': return ctrl ? (e.preventDefault(), setSel(s.fr, sh.cols.length - 1, e.shiftKey)) : move(0, 1);
+    case 'PageUp': return move(-page, 0);
+    case 'PageDown': return move(page, 0);
+    case 'Home': e.preventDefault(); return setSel(ctrl ? 0 : s.fr, 0, e.shiftKey);
+    case 'End': e.preventDefault(); return setSel(ctrl ? sh.view.length - 1 : s.fr, sh.cols.length - 1, e.shiftKey);
+    case 'Tab': e.preventDefault(); return setSel(s.fr, s.fc + (e.shiftKey ? -1 : 1));
+    case 'Enter': if (ctrl || e.altKey) return; e.preventDefault(); return setSel(s.fr + (e.shiftKey ? -1 : 1), s.fc);
+    case 'F2': e.preventDefault(); return startEdit();
+    case 'Delete': case 'Backspace': e.preventDefault(); return clearCells();
+    case 'Escape': s.ar = s.fr; s.ac = s.fc; renderGrid(); updateUI(); return;
+  }
+  if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); s.ar = 0; s.ac = 0; s.fr = sh.view.length - 1; s.fc = sh.cols.length - 1; renderGrid(); updateUI(); return; }
+  if (e.key.length === 1 && !ctrl && !e.altKey) { e.preventDefault(); startEdit(e.key); }
+});
+
+/* ================= Editing ================= */
+let editor = null;
+function startEdit(initial = null) {
+  const sh = sheet(); if (!sh || !sh.view.length) return;
+  stopEdit(true);
+  const s = sh.sel, {xs, numW} = layoutCache, col = sh.cols[s.fc];
+  ensureVisible(s.fr, s.fc); renderGrid();
+  const inp = document.createElement('input');
+  inp.className = 'cell-edit'; inp.spellcheck = false;
+  Object.assign(inp.style, {left: numW + xs[s.fc] + 'px', top: headH() + s.fr * rowH() + 'px',
+    width: Math.max(col.width, 160) + 'px', height: rowH() + 'px', textAlign: col.type === 'number' ? 'right' : 'left'});
+  inp.value = initial != null ? initial : rawText(sh.rows[sh.view[s.fr]][s.fc]);
+  grid.append(inp); inp.focus();
+  if (initial == null) inp.select();
+  editor = {inp, r: s.fr, c: s.fc, sheet: sh};
+  inp.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); stopEdit(false); grid.focus(); }
+    else if (e.key === 'Enter') { e.preventDefault(); stopEdit(true); grid.focus(); setSel(s.fr + (e.shiftKey ? -1 : 1), s.fc); }
+    else if (e.key === 'Tab') { e.preventDefault(); stopEdit(true); grid.focus(); setSel(s.fr, s.fc + (e.shiftKey ? -1 : 1)); }
+  });
+  inp.addEventListener('blur', () => stopEdit(true));
+}
+function stopEdit(commit) {
+  if (!editor) return;
+  const {inp, r, c, sheet: sh} = editor;
+  editor = null; inp.remove();
+  if (!commit || sh !== sheet()) return;
+  const row = sh.view[r]; if (row == null) return;
+  const old = sh.rows[row][c], val = coerce(inp.value, sh.cols[c], old);
+  if (rawText(old) === rawText(val) && typeof old === typeof val) return;
+  doOp({t: 'cells', ch: [{r: row, c, o: old, n: val}]});
+}
+/* Keep JSON/Excel values typed: "12" in a number column stays a number. CSV keeps text exactly. */
+function coerce(text, col, old) {
+  const d = cur();
+  if (d.format === 'csv' || d.format === 'tsv' || d.format === 'txt') return text;
+  if (text === '') return '';
+  if (col.type === 'number' || typeof old === 'number') { const n = toNumber(text, col.numStyle); if (Number.isFinite(n)) return n; }
+  if (typeof old === 'boolean' && /^(true|false)$/i.test(text)) return text.toLowerCase() === 'true';
+  return text;
+}
+function clearCells() {
+  const sh = sheet(); if (!sh || !sh.view.length) return;
+  const {r0, r1, c0, c1} = selRange(sh.sel), ch = [];
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const row = sh.view[r], o = sh.rows[row][c];
+    if (!isEmpty(o)) ch.push({r: row, c, o, n: ''});
+  }
+  if (ch.length) doOp({t: 'cells', ch});
+}
+
+/* ================= Clipboard ================= */
+function selectionTsv() {
+  const sh = sheet(), {r0, r1, c0, c1} = selRange(sh.sel);
+  if ((r1 - r0 + 1) * (c1 - c0 + 1) > 1e6) { toast(t('toast.tooBig')); return null; }
+  const q = v => { const s = rawText(v); return /[\t\n"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const lines = [];
+  for (let r = r0; r <= r1; r++) { const row = sh.rows[sh.view[r]]; lines.push(row.slice(c0, c1 + 1).map(q).join('\t')); }
+  return {text: lines.join('\r\n'), n: (r1 - r0 + 1) * (c1 - c0 + 1)};
+}
+document.addEventListener('copy', e => {
+  if (document.activeElement !== grid || !sheet()) return;
+  const out = selectionTsv(); if (!out) return;
+  e.preventDefault(); e.clipboardData.setData('text/plain', out.text); toast(t('toast.copied', {n: num(out.n)}));
+});
+document.addEventListener('cut', e => {
+  if (document.activeElement !== grid || !sheet()) return;
+  const out = selectionTsv(); if (!out) return;
+  e.preventDefault(); e.clipboardData.setData('text/plain', out.text); clearCells();
+});
+document.addEventListener('paste', e => {
+  if (document.activeElement !== grid || !sheet()) return;
+  e.preventDefault();
+  pasteText(e.clipboardData.getData('text/plain'));
+});
+function pasteText(text) {
+  const sh = sheet(); if (!text) return;
+  const data = Papa.parse(text.replace(/\r?\n$/, ''), {delimiter: '\t'}).data;
+  const {r0, c0} = selRange(sh.sel), ops = [], ch = [];
+  const need = r0 + data.length - sh.view.length;
+  if (need > 0) {
+    const at = sh.rows.length;
+    ops.push({t: 'rows+', at, rows: Array.from({length: need}, () => Array(sh.cols.length).fill(''))});
+  }
+  const viewRow = r => r < sh.view.length ? sh.view[r] : sh.rows.length + (r - sh.view.length);
+  data.forEach((line, i) => line.forEach((v, j) => {
+    const c = c0 + j; if (c >= sh.cols.length) return;
+    const row = viewRow(r0 + i), o = row < sh.rows.length ? sh.rows[row][c] : '';
+    ch.push({r: row, c, o, n: coerce(v, sh.cols[c], o)});
+  }));
+  ops.push({t: 'cells', ch});
+  doOp(ops.length > 1 ? {t: 'batch', ops} : ops[0], need > 0);
+  sh.sel.fr = Math.min(sh.view.length - 1, r0 + data.length - 1);
+  sh.sel.fc = Math.min(sh.cols.length - 1, c0 + Math.max(...data.map(l => l.length)) - 1);
+  renderGrid(); updateUI();
+  toast(t('toast.pasted', {n: num(ch.length)}));
+}
+
+/* ================= Undo / redo (operations) ================= */
+function applyOp(sh, op, undo) {
+  switch (op.t) {
+    case 'cells': for (const x of op.ch) { if (sh.rows[x.r]) sh.rows[x.r][x.c] = undo ? x.o : x.n; } break;
+    case 'rows+': if (undo) sh.rows.splice(op.at, op.rows.length); else sh.rows.splice(op.at, 0, ...op.rows.map(r => r.slice())); break;
+    case 'rows-':
+      if (undo) for (const it of op.items) sh.rows.splice(it.i, 0, it.row);
+      else for (let k = op.items.length - 1; k >= 0; k--) sh.rows.splice(op.items[k].i, 1);
+      break;
+    case 'col+': case 'col-': {
+      const add = (op.t === 'col+') !== undo;
+      if (add) { sh.cols.splice(op.at, 0, {...op.col}); sh.rows.forEach((r, i) => r.splice(op.at, 0, op.vals[i] ?? '')); }
+      else { sh.cols.splice(op.at, 1); sh.rows.forEach(r => r.splice(op.at, 1)); }
+      shiftColState(sh, op.at, add ? 1 : -1);
+      break;
+    }
+    case 'rename': sh.cols[op.c].name = undo ? op.o : op.n; break;
+    case 'header': setHeader(sh, undo ? !op.on : op.on); break;
+    case 'batch': (undo ? [...op.ops].reverse() : op.ops).forEach(o => applyOp(sh, o, undo)); break;
+  }
+}
+function shiftColState(sh, at, delta) {
+  const f = {};
+  for (const [c, v] of Object.entries(sh.filters)) { const n = +c; if (delta < 0 && n === at) continue; f[n >= at ? n + delta : n] = v; }
+  sh.filters = f;
+  if (sh.sort.c === at && delta < 0) sh.sort = {c: -1, dir: 0};
+  else if (sh.sort.c >= at) sh.sort.c += delta;
+  sh.chart = null;
+}
+const structural = op => op.t !== 'cells' && op.t !== 'rename' || (op.t === 'batch');
+function doOp(op, forceRecalc = false) {
+  const d = cur(), sh = sheet();
+  op.s = d.si;
+  applyOp(sh, op, false);
+  if (d.history.length < d.cleanDepth) d.cleanDepth = -1;
+  d.history.push(op); if (d.history.length > 300) { d.history.shift(); d.cleanDepth--; }
+  d.future = [];
+  afterOp(sh, op, forceRecalc);
+}
+function afterOp(sh, op, forceRecalc) {
+  const d = cur();
+  d.dirty = d.history.length !== d.cleanDepth;
+  const cols = new Set();
+  const collect = o => o.t === 'cells' ? o.ch.forEach(x => cols.add(x.c)) : o.t === 'batch' ? o.ops.forEach(collect) : null;
+  collect(op);
+  if (op.t === 'cells') cols.forEach(c => detectType(sh, c)); else detectAll(sh);
+  if (op.t === 'col+' || op.t === 'col-' || op.t === 'header') measureCols(sh);
+  refresh(forceRecalc || structural(op));
+  renderTabs();
+}
+function undoRedo(redo) {
+  const d = cur(); if (!d) return;
+  stopEdit(true);
+  const from = redo ? d.future : d.history, to = redo ? d.history : d.future;
+  if (!from.length) return;
+  const op = from.pop(); to.push(op);
+  if (op.s !== d.si) { d.si = op.s; $('#globalSearch').value = sheet().query; }
+  applyOp(sheet(), op, !redo);
+  afterOp(sheet(), op, true);
+}
+
+/* ================= Row & column operations ================= */
+function insertRow() {
+  const sh = sheet(); if (!sh) return;
+  const at = sh.view.length ? sh.view[sh.sel.fr] + 1 : sh.rows.length;
+  doOp({t: 'rows+', at, rows: [Array(sh.cols.length).fill('')]});
+  const r = sh.view.indexOf(at);
+  if (r >= 0) setSel(r, sh.sel.fc);
+}
+function deleteRows() {
+  const sh = sheet(); if (!sh || !sh.view.length) return;
+  const {r0, r1} = selRange(sh.sel);
+  const items = sh.view.slice(r0, r1 + 1).sort((a, b) => a - b).map(i => ({i, row: sh.rows[i]}));
+  doOp({t: 'rows-', items});
+  setSel(Math.min(r0, sh.view.length - 1), sh.sel.fc);
+}
+function insertCol() {
+  const sh = sheet(); if (!sh) return;
+  const at = sh.sel.fc + 1;
+  let n = sh.cols.length + 1, name = t('ui.newColName', {n});
+  while (sh.cols.some(c => c.name === name)) name = t('ui.newColName', {n: ++n});
+  doOp({t: 'col+', at, col: {name, type: 'text', numStyle: 'en', width: 120}, vals: []});
+  setSel(sh.sel.fr, at);
+}
+function deleteCols() {
+  const sh = sheet(); if (!sh) return;
+  const {c0, c1} = selRange(sh.sel);
+  if (c1 - c0 + 1 >= sh.cols.length) return toast(t('toast.lastCol'));
+  const ops = [];
+  for (let c = c1; c >= c0; c--) ops.push({t: 'col-', at: c, col: {...sh.cols[c]}, vals: sh.rows.map(r => r[c])});
+  doOp(ops.length > 1 ? {t: 'batch', ops} : ops[0]);
+  sh.sel.ac = sh.sel.fc = Math.min(c0, sh.cols.length - 1);
+  renderGrid();
+}
+function renameColumn(c = sheet().sel.fc) {
+  const sh = sheet(), old = sh.cols[c].name;
+  modal(t('ui.renameTitle'), `<input class="field-in" id="renameIn" value="${esc(old)}" spellcheck="false">`, [
+    {label: t('ui.cancel'), onClick: closeModal},
+    {label: t('ui.ok'), primary: true, onClick: () => {
+      const v = $('#renameIn').value.trim(); closeModal();
+      if (v && v !== old) doOp({t: 'rename', c, o: old, n: v});
+      grid.focus();
+    }}
+  ]);
+  const inp = $('#renameIn'); inp.focus(); inp.select();
+  inp.onkeydown = e => { if (e.key === 'Enter') $('#modalFoot .primary').click(); };
+}
+function setHeader(sh, on) {
+  if (on === sh.header) return;
+  if (on) {
+    const first = sh.rows.shift() || [];
+    sh.cols.forEach((c, i) => { c.name = rawText(first[i]).trim() || colName(i); });
+  } else {
+    sh.rows.unshift(sh.cols.map(c => c.name));
+    sh.cols.forEach((c, i) => { c.name = colName(i); });
+  }
+  sh.header = on;
+}
+function sortBy(dir) { const sh = sheet(); if (!sh) return; sh.sort = {c: sh.sel.fc, dir}; refresh(true); }
+function clearView() {
+  const sh = sheet(); if (!sh) return;
+  sh.sort = {c: -1, dir: 0}; sh.filters = {}; sh.query = ''; $('#globalSearch').value = '';
+  refresh(true);
+}
+
+/* ================= Panels: column statistics, properties, chart settings ================= */
+function buildPanels() { buildColPanel(); buildProps(); buildChartPanel(); }
+function buildColPanel() {
+  const box = $('#colPanel'), sh = sheet();
+  if (!sh || settings.dockTab !== 'column') { if (!sh) box.innerHTML = ''; return; }
+  const c = sh.sel.fc, col = sh.cols[c];
+  if (!col) { box.innerHTML = `<div class="empty">${esc(t('ui.noColumn'))}</div>`; return; }
+  const vals = sh.view.map(i => sh.rows[i][c]), filled = vals.filter(v => !isEmpty(v));
+  const counts = new Map();
+  for (const v of filled) { const k = rawText(v); counts.set(k, (counts.get(k) || 0) + 1); }
+  const kv = (k, v) => `<div class="kv"><span>${esc(t(k))}</span><b title="${esc(v)}">${esc(v)}</b></div>`;
+  let h = `<div class="col-title" title="${esc(col.name)}">${esc(col.name)}</div>
+    ${kv('ui.type', t('type.' + col.type))}${kv('ui.values', num(filled.length))}${kv('ui.empty', num(vals.length - filled.length))}${kv('ui.unique', num(counts.size))}`;
+  if (col.type === 'number') {
+    const ns = filled.map(v => toNumber(v, col.numStyle)).filter(Number.isFinite).sort((a, b) => a - b);
+    if (ns.length) {
+      const sum = ns.reduce((a, b) => a + b, 0), mid = ns.length >> 1;
+      const median = ns.length % 2 ? ns[mid] : (ns[mid - 1] + ns[mid]) / 2;
+      h += `<div class="sect">${esc(t('type.number'))}</div>${kv('ui.min', num(ns[0]))}${kv('ui.max', num(ns[ns.length - 1]))}
+        ${kv('ui.sum', num(sum))}${kv('ui.mean', num(sum / ns.length))}${kv('ui.median', num(median))}`;
+    }
+  } else if (col.type === 'date') {
+    const ts = filled.map(toTime).filter(Number.isFinite);
+    if (ts.length) {
+      const f = ms => new Date(ms).toLocaleString(lang, {dateStyle: 'medium'});
+      h += `<div class="sect">${esc(t('type.date'))}</div>${kv('ui.earliest', f(Math.min(...ts)))}${kv('ui.latest', f(Math.max(...ts)))}`;
+    }
+  }
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (top.length && counts.size < filled.length) {
+    const max = top[0][1];
+    h += `<div class="sect">${esc(t('ui.top'))}</div><div class="bars">` + top.map(([k, n]) =>
+      `<div class="bar"><span title="${esc(k)}">${esc(k)}</span><b>${num(n)}</b><i style="width:${Math.max(2, n / max * 100)}%"></i></div>`).join('') + '</div>';
+  }
+  h += `<p class="empty" style="padding:14px 0 0;text-align:left">${esc(t('ui.shownRows', {n: num(sh.view.length)}))}</p>`;
+  box.innerHTML = h;
+}
+const FORMAT_NAMES = {csv: 'CSV', tsv: 'TSV', txt: 'Text (CSV)', json: 'JSON', jsonl: 'JSON Lines', xlsx: 'Excel (.xlsx)', xlsm: 'Excel (.xlsm)', xls: 'Excel 97–2003 (.xls)', ods: 'OpenDocument (.ods)'};
+function buildProps() {
+  const d = cur(), sh = sheet(), box = $('#props');
+  if (!d) { box.innerHTML = ''; return; }
+  const kv = (k, v) => v ? `<div class="kv"><span>${esc(t(k))}</span><b title="${esc(v)}">${esc(v)}</b></div>` : '';
+  box.innerHTML = `<div class="sect">${esc(t('ui.file'))}</div>${kv('ui.format', FORMAT_NAMES[d.format] || d.format)}
+    ${kv('ui.delimiter', d.delimiter ? t('delim.' + d.delimiter) : '')}${kv('ui.encoding', d.encoding)}${kv('ui.size', d.size ? fmtSize(d.size) : '')}
+    ${kv('ui.path', d.path || '')}${kv('ui.sheets', d.sheets.length > 1 ? String(d.sheets.length) : '')}
+    <div class="sect">${esc(t('ui.table2'))}</div>${kv('ui.rows', '') /* label only via status */}
+    <div class="kv"><span>${esc(t('ui.cols', {n: ''}).trim())}</span><b>${num(sh.cols.length)}</b></div>
+    <div class="kv"><span>${esc(t('ui.rows', {n: ''}).trim())}</span><b>${num(sh.rows.length)}</b></div>
+    <label class="switch"><input type="checkbox" data-act-check="toggleHeader"${sh.header ? ' checked' : ''}><span></span>${esc(t('ui.headerRow'))}</label>`;
+}
+$('#props').addEventListener('change', e => { if (e.target.dataset.actCheck) run(e.target.dataset.actCheck); });
+
+/* ================= Charts ================= */
+let chart = null;
+function chartCfg(sh) {
+  if (!sh.chart) {
+    const firstNum = sh.cols.findIndex(c => c.type === 'number');
+    let x = sh.cols.findIndex(c => c.type === 'text' || c.type === 'date');
+    if (x < 0) x = firstNum === 0 && sh.cols.length > 1 ? 1 : 0;
+    const y = sh.cols.findIndex((c, i) => c.type === 'number' && i !== x);
+    sh.chart = {type: 'bar', x, ys: y >= 0 ? [y] : [], agg: 'sum', limit: 30};
+  }
+  return sh.chart;
+}
+function buildChartPanel() {
+  const box = $('#chartPanel'), sh = sheet();
+  if (!sh) { box.innerHTML = ''; return; }
+  if (settings.dockTab !== 'chart') return;
+  const cfg = chartCfg(sh);
+  const opt = (v, l, cv) => `<option value="${v}"${String(v) === String(cv) ? ' selected' : ''}>${esc(l)}</option>`;
+  const nums = sh.cols.map((c, i) => [c, i]).filter(([c]) => c.type === 'number');
+  box.innerHTML = `
+    <div class="field"><label>${esc(t('ui.chartType'))}</label><select data-cfg="type">${['bar', 'line', 'pie', 'scatter'].map(v => opt(v, t('chart.' + v), cfg.type)).join('')}</select></div>
+    <div class="field"><label>${esc(t('ui.xCol'))}</label><select data-cfg="x">${sh.cols.map((c, i) => opt(i, c.name, cfg.x)).join('')}</select></div>
+    <div class="field"><label>${esc(t('ui.yCols'))}</label><div class="checks">${nums.length ? nums.map(([c, i]) =>
+      `<label><input type="checkbox" data-y="${i}"${cfg.ys.includes(i) ? ' checked' : ''}>${esc(c.name)}</label>`).join('') : `<span class="empty" style="padding:4px">—</span>`}</div></div>
+    <div class="field"><label>${esc(t('ui.agg'))}</label><select data-cfg="agg">${['none', 'sum', 'avg', 'count'].map(v => opt(v, t('agg.' + v), cfg.agg)).join('')}</select></div>
+    <div class="field"><label>${esc(t('ui.limit'))}</label><select data-cfg="limit">${[10, 20, 30, 50, 100, 500].map(v => opt(v, String(v), cfg.limit)).join('')}</select></div>
+    <button class="btn-sm" data-act="viewSplit" style="margin-top:6px">${esc(t('a.viewSplit'))}</button>`;
+}
+$('#chartPanel').addEventListener('change', e => {
+  const sh = sheet(), cfg = chartCfg(sh), k = e.target.dataset.cfg;
+  if (k) cfg[k] = k === 'x' || k === 'limit' ? +e.target.value : e.target.value;
+  if (e.target.dataset.y != null) {
+    const y = +e.target.dataset.y;
+    cfg.ys = e.target.checked ? [...new Set([...cfg.ys, y])] : cfg.ys.filter(v => v !== y);
+  }
+  if (settings.view === 'table') { settings.view = 'split'; applySettings(); }
+  renderChart();
+});
+const cssVar = n => getComputedStyle(document.body).getPropertyValue(n).trim();
+function chartData(sh, cfg) {
+  const rows = sh.view.map(i => sh.rows[i]), xcol = sh.cols[cfg.x];
+  const ys = cfg.ys.filter(y => sh.cols[y]);
+  const numOf = (r, y) => toNumber(r[y], sh.cols[y].numStyle);
+  if (cfg.type === 'scatter') {
+    const y = ys[0]; if (y == null) return null;
+    const pts = [];
+    for (const r of rows) { const xv = xcol.type === 'date' ? toTime(r[cfg.x]) : toNumber(r[cfg.x], xcol.numStyle), yv = numOf(r, y); if (Number.isFinite(xv) && Number.isFinite(yv)) pts.push({x: xv, y: yv}); if (pts.length >= 5000) break; }
+    return {scatter: true, datasets: [{label: sh.cols[y].name, data: pts}]};
+  }
+  if (cfg.agg === 'count') {
+    const m = new Map();
+    for (const r of rows) { const k = rawText(r[cfg.x]); m.set(k, (m.get(k) || 0) + 1); }
+    let entries = [...m.entries()];
+    if (cfg.type !== 'line') entries.sort((a, b) => b[1] - a[1]);
+    entries = entries.slice(0, cfg.limit);
+    return {labels: entries.map(e => e[0]), datasets: [{label: t('agg.count'), data: entries.map(e => e[1])}]};
+  }
+  if (!ys.length) return null;
+  if (cfg.agg === 'none') {
+    const part = rows.slice(0, cfg.limit);
+    return {labels: part.map(r => rawText(r[cfg.x])), datasets: ys.map(y => ({label: sh.cols[y].name, data: part.map(r => { const n = numOf(r, y); return Number.isFinite(n) ? n : null; })}))};
+  }
+  const groups = new Map();
+  for (const r of rows) {
+    const k = rawText(r[cfg.x]);
+    let g = groups.get(k); if (!g) groups.set(k, g = ys.map(() => ({s: 0, n: 0})));
+    ys.forEach((y, j) => { const n = numOf(r, y); if (Number.isFinite(n)) { g[j].s += n; g[j].n++; } });
+  }
+  let keys = [...groups.keys()];
+  const val = (k, j) => { const g = groups.get(k)[j]; return cfg.agg === 'avg' ? (g.n ? g.s / g.n : null) : g.s; };
+  if (xcol.type === 'number' || xcol.type === 'date') {
+    const key = k => xcol.type === 'date' ? toTime(k) : toNumber(k, xcol.numStyle);
+    keys.sort((a, b) => (key(a) || 0) - (key(b) || 0));
+    keys = keys.slice(0, cfg.limit);
+  } else if (keys.length > cfg.limit || cfg.type !== 'line') {
+    keys.sort((a, b) => (val(b, 0) || 0) - (val(a, 0) || 0));
+    keys = keys.slice(0, cfg.limit);
+  }
+  return {labels: keys, datasets: ys.map((y, j) => ({label: sh.cols[y].name, data: keys.map(k => val(k, j))}))};
+}
+function renderChart() {
+  const sh = sheet();
+  if (chart) { chart.destroy(); chart = null; }
+  if (!sh || settings.view === 'table' || !window.Chart) return;
+  const cfg = chartCfg(sh), data = chartData(sh, cfg);
+  const empty = $('#chartEmpty');
+  const xName = sh.cols[cfg.x] ? sh.cols[cfg.x].name : '';
+  $('#chartTitle').textContent = data ? `${cfg.agg === 'count' ? t('agg.count') : cfg.ys.map(y => sh.cols[y] && sh.cols[y].name).filter(Boolean).join(', ')} ${cfg.type === 'scatter' ? '' : t('ui.byX', {x: xName})}` : '';
+  empty.textContent = data ? '' : t('ui.chartNeedNumber');
+  empty.hidden = !!data;
+  if (!data) return;
+  const text = cssVar('--text'), line = cssVar('--grid-line');
+  const pie = cfg.type === 'pie';
+  data.datasets.forEach((ds, i) => {
+    const c = PALETTE[i % PALETTE.length];
+    Object.assign(ds, pie ? {backgroundColor: data.labels.map((_, k) => PALETTE[k % PALETTE.length]), borderColor: cssVar('--grid-bg'), borderWidth: 2}
+      : {backgroundColor: cfg.type === 'line' ? c + '33' : c + 'cc', borderColor: c, borderWidth: cfg.type === 'line' ? 2 : 0,
+        pointRadius: cfg.type === 'scatter' ? 3 : 2, fill: cfg.type === 'line' && data.datasets.length === 1, tension: 0.25, borderRadius: 3});
+  });
+  const scales = pie ? {} : {
+    x: {type: data.scatter ? 'linear' : 'category', ticks: {color: text, maxRotation: 50, autoSkip: true}, grid: {color: line}, title: {display: true, text: xName, color: text}},
+    y: {ticks: {color: text}, grid: {color: line}, beginAtZero: cfg.type === 'bar'}
+  };
+  chart = new Chart($('#chart'), {type: data.scatter ? 'scatter' : cfg.type, data: {labels: data.labels, datasets: data.datasets},
+    options: {responsive: true, maintainAspectRatio: false, animation: {duration: 250}, scales,
+      plugins: {legend: {display: pie || data.datasets.length > 1, labels: {color: text}}, tooltip: {mode: pie ? 'nearest' : 'index', intersect: false}}}});
+}
+async function exportChart() {
+  if (!chart) return toast(t('ui.chartNeedNumber'));
+  const src = $('#chart'), c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d'); ctx.fillStyle = cssVar('--grid-bg') || '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(src, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const name = cur().name.replace(/\.[^.]+$/, '') + (lang === 'de' ? '-Diagramm.png' : '-chart.png');
+  const r = await writeBytes(new Uint8Array(await blob.arrayBuffer()), {name, filter: 'PNG', ext: 'png'}).catch(e => toast(t('toast.saveFail', {e})));
+  if (r) toast(t('toast.exported', {name: r.path || r.name}));
+}
+
+/* ================= Saving & exporting ================= */
+const FORMATS = {
+  csv: {ext: 'csv', filter: 'CSV'}, csvSemi: {ext: 'csv', filter: 'CSV'}, tsv: {ext: 'tsv', filter: 'TSV'},
+  json: {ext: 'json', filter: 'JSON'}, jsonl: {ext: 'jsonl', filter: 'JSON Lines'}, xlsx: {ext: 'xlsx', filter: 'Excel'}, md: {ext: 'md', filter: 'Markdown'}
+};
+function typed(v, col) {
+  if (isEmpty(v)) return null;
+  if (v instanceof Date || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (col.type === 'number') { const n = toNumber(v, col.numStyle); if (Number.isFinite(n)) return n; }
+  if (col.type === 'bool' && /^(true|false)$/i.test(v.trim())) return v.trim().toLowerCase() === 'true';
+  return v;
+}
+function rowsOf(sh, onlyVisible) { return onlyVisible ? sh.view.map(i => sh.rows[i]) : sh.rows; }
+function serialize(d, fmt, onlyVisible, keepRaw) {
+  const sh = sheet(), cols = sh.cols, rows = rowsOf(sh, onlyVisible);
+  const utf8 = s => new TextEncoder().encode(s);
+  if (fmt === 'csv' || fmt === 'csvSemi' || fmt === 'tsv') {
+    const delim = fmt === 'tsv' ? '\t' : fmt === 'csvSemi' ? ';' : keepRaw ? d.delimiter || ',' : ',';
+    const cell = (v, col) => {
+      if (fmt === 'csvSemi' && col.type === 'number' && col.numStyle === 'en') { const n = toNumber(v, 'en'); if (Number.isFinite(n)) return String(n).replace('.', ','); }
+      return rawText(v);
+    };
+    const aoa = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...rows.map(r => r.map((v, i) => cell(v, cols[i])))];
+    const bom = fmt === 'csvSemi' || (keepRaw && d.bom);
+    return (bom ? '﻿' : '') + Papa.unparse(aoa, {delimiter: delim, newline: '\r\n'});
+  }
+  if (fmt === 'json' || fmt === 'jsonl') {
+    const objs = rows.map(r => Object.fromEntries(cols.map((c, i) => {
+      const v = typed(r[i], c);
+      return [c.name, v instanceof Date ? isoDate(v) : v];
+    })));
+    return fmt === 'json' ? JSON.stringify(objs, null, 2) + '\n' : objs.map(o => JSON.stringify(o)).join('\n') + '\n';
+  }
+  if (fmt === 'md') {
+    const cellMd = v => rawText(v).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+    return [`| ${cols.map(c => cellMd(c.name)).join(' | ')} |`,
+      `|${cols.map(c => c.type === 'number' ? '---:' : ':---').join('|')}|`,
+      ...rows.map(r => `| ${r.map(cellMd).join(' | ')} |`)].join('\n') + '\n';
+  }
+  if (fmt === 'xlsx' || SHEET_EXT.includes(fmt)) {
+    const wb = XLSX.utils.book_new();
+    d.sheets.forEach(s => {
+      const rs = s === sh ? rows : s.rows;
+      const aoa = [s.cols.map(c => c.name), ...rs.map(r => r.map((v, i) => typed(v, s.cols[i])))];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, {cellDates: true}), s.name.slice(0, 31) || 'Sheet');
+    });
+    return new Uint8Array(XLSX.write(wb, {type: 'array', bookType: fmt === 'xlsx' ? 'xlsx' : fmt === 'xlsm' ? 'xlsx' : fmt}));
+  }
+  throw new Error('Unknown format ' + fmt);
+}
+const toBytes = out => typeof out === 'string' ? new TextEncoder().encode(out) : out;
+/* Saves in the file's own format (CSV keeps its separator and text exactly). */
+async function save() {
+  const d = cur(); if (!d) return;
+  stopEdit(true);
+  if (d.isNew || !d.path && invoke) return exportDialog(true);
+  const fmt = ['csv', 'txt'].includes(d.format) ? 'csv' : d.format;
+  try {
+    const bytes = toBytes(serialize(d, fmt, false, true));
+    const r = await writeBytes(bytes, {path: d.path, name: d.name, filter: FORMAT_NAMES[d.format] || 'Data', ext: extOf(d.name)});
+    if (!r) return;
+    markSaved(d, r, bytes.length);
+  } catch (e) { toast(t('toast.saveFail', {e: e.message || e})); }
+}
+function markSaved(d, r, size) {
+  if (r.path) { d.path = r.path; d.name = r.name; addRecent(r.path, r.name); }
+  d.size = size; d.cleanDepth = d.history.length; d.dirty = false; d.isNew = false;
+  renderTabs(); updateUI(); buildProps(); saveState();
+  toast(t('toast.saved', {name: d.name}));
+}
+function exportDialog(saveAs) {
+  const d = cur(); if (!d) return;
+  stopEdit(true);
+  const def = saveAs ? (d.format === 'jsonl' ? 'jsonl' : d.format === 'json' ? 'json' : d.format === 'tsv' ? 'tsv' : SHEET_EXT.includes(d.format) ? 'xlsx' : d.delimiter === ';' ? 'csvSemi' : 'csv') : 'xlsx';
+  const list = ['csv', 'csvSemi', 'tsv', 'json', 'jsonl', 'xlsx', ...(saveAs ? [] : ['md'])];
+  modal(t(saveAs ? 'ui.saveAsTitle' : 'ui.exportTitle'), `<div class="fmt-list">${list.map(f =>
+    `<label><input type="radio" name="fmt" value="${f}"${f === def ? ' checked' : ''}><span>${esc(t('fmt.' + f))}<small>${esc(t('fmt.' + f + 'D'))}</small></span></label>`).join('')}</div>
+    ${saveAs ? '' : `<label class="switch"><input type="checkbox" id="onlyVis"${sheet().view.length !== sheet().rows.length ? ' checked' : ''}><span></span>${esc(t('ui.onlyVisible'))}</label>`}`, [
+    {label: t('ui.cancel'), onClick: closeModal},
+    {label: t(saveAs ? 'ui.save' : 'ui.export'), primary: true, onClick: async () => {
+      const fmt = $('input[name="fmt"]:checked').value, only = !saveAs && $('#onlyVis').checked;
+      closeModal();
+      const {ext, filter} = FORMATS[fmt], name = d.name.replace(/\.[^.]+$/, '') + '.' + ext;
+      try {
+        const bytes = toBytes(serialize(d, fmt, only, false));
+        const r = await writeBytes(bytes, {name, filter, ext});
+        if (!r) return;
+        if (saveAs) {
+          Object.assign(d, {format: fmt === 'csvSemi' ? 'csv' : fmt, delimiter: fmt === 'csvSemi' ? ';' : fmt === 'tsv' ? '\t' : fmt === 'csv' ? ',' : '',
+            bom: fmt === 'csvSemi', encoding: fmt === 'xlsx' ? '' : fmt === 'csvSemi' ? 'UTF-8 (BOM)' : 'UTF-8'});
+          if (fmt !== 'xlsx') { const sh = sheet(); d.sheets = [sh]; d.si = 0; }
+          markSaved(d, r.path ? r : {...r, path: null}, bytes.length);
+          if (!r.path) d.name = name;
+          renderTabs();
+        } else toast(t('toast.exported', {name: r.path || r.name}));
+      } catch (e) { toast(t('toast.saveFail', {e: e.message || e})); }
+    }}
+  ]);
+}
+
+/* ================= Status & title ================= */
+function updateUI() {
+  const d = cur(), sh = sheet();
+  $('#apptitle').textContent = d ? `${d.name}${d.dirty ? ' ●' : ''}  —  Data Studio` : 'Data Studio';
+  document.title = d ? `${d.dirty ? '● ' : ''}${d.name} — Data Studio` : 'Data Studio';
+  const st = $('#stState');
+  st.className = 'st-state' + (d && d.dirty ? ' dirty' : '');
+  st.textContent = d ? (d.dirty ? t('st.dirty') : t('st.saved')) : '';
+  if (!sh) { ['#stRows', '#stCell', '#stSel', '#stFormat', '#stSize'].forEach(s => $(s).textContent = ''); return; }
+  $('#stRows').textContent = (sh.view.length === sh.rows.length ? t('ui.rows', {n: num(sh.rows.length)}) : t('ui.rowsFiltered', {n: num(sh.view.length), total: num(sh.rows.length)})) +
+    ' · ' + t('ui.cols', {n: num(sh.cols.length)});
+  const s = sh.sel, col = sh.cols[s.fc];
+  $('#stCell').textContent = sh.view.length && col ? t('ui.cell', {r: num(sh.view[s.fr] + 1), c: col.name}) : '';
+  const {r0, r1, c0, c1} = selRange(s);
+  let sel = '';
+  if ((r1 > r0 || c1 > c0) && (r1 - r0 + 1) * (c1 - c0 + 1) <= 500000) {
+    let n = 0, sum = 0, cnt = 0;
+    for (let r = r0; r <= r1; r++) { const row = sh.rows[sh.view[r]]; for (let c = c0; c <= c1; c++) { const v = row[c]; if (isEmpty(v)) continue; n++; const x = toNumber(v, sh.cols[c].numStyle); if (Number.isFinite(x)) { sum += x; cnt++; } } }
+    sel = t('ui.selStats', {n: num(n)}) + (cnt ? ' · ' + t('ui.selSum', {v: num(sum)}) + ' · ' + t('ui.selAvg', {v: num(sum / cnt)}) : '');
+  }
+  $('#stSel').textContent = sel;
+  $('#stFormat').textContent = FORMAT_NAMES[d.format] || d.format;
+  $('#stSize').textContent = d.size ? fmtSize(d.size) : '';
+}
+
+/* ================= Menus, toolbars, shortcuts ================= */
+const ICONS = {
+  open: '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  newt: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M10 4v16M16 13v6M13 16h6"/></svg>',
+  save: '<svg viewBox="0 0 24 24"><path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8M7 21v-7h10v7"/></svg>',
+  undo: '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
+  redo: '<svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg>',
+  export: '<svg viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>',
+  rowAdd: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1"/><path d="M12 15v6M9 18h6"/></svg>',
+  rowDel: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1"/><path d="M9 18h6"/></svg>',
+  colAdd: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="7" height="18" rx="1"/><path d="M15 12h6M18 9v6"/></svg>',
+  colDel: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="7" height="18" rx="1"/><path d="M15 12h6"/></svg>',
+  sortAsc: '<svg viewBox="0 0 24 24"><path d="M7 20V4M3 8l4-4 4 4M14 6h4M14 12h6M14 18h8"/></svg>',
+  sortDesc: '<svg viewBox="0 0 24 24"><path d="M7 4v16M3 16l4 4 4-4M14 6h8M14 12h6M14 18h4"/></svg>',
+  filter: '<svg viewBox="0 0 24 24"><path d="M3 4h18l-7 8v6l-4 2v-8z"/></svg>',
+  clear: '<svg viewBox="0 0 24 24"><path d="M3 4h18l-7 8v6l-4 2v-8z"/><path d="m16 16 5 5M21 16l-5 5"/></svg>',
+  chart: '<svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg>',
+  panel: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>',
+  rows: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  help: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"/></svg>'
+};
+const setView = v => { settings.view = v; applySettings(); };
+const A = {
+  openFile: async () => openFiles(await pickFiles()), newTable, save, saveAs: () => exportDialog(true), exportAs: () => exportDialog(false),
+  closeTab: () => closeTab(active), undo: () => undoRedo(false), redo: () => undoRedo(true),
+  copy: () => { const out = selectionTsv(); if (out) navigator.clipboard.writeText(out.text).then(() => toast(t('toast.copied', {n: num(out.n)}))); },
+  selectAll: () => { const sh = sheet(), s = sh.sel; s.ar = 0; s.ac = 0; s.fr = sh.view.length - 1; s.fc = sh.cols.length - 1; grid.focus(); renderGrid(); updateUI(); },
+  editCell: () => startEdit(), clearCells, find: () => { $('#globalSearch').focus(); $('#globalSearch').select(); },
+  insertRow, deleteRows, insertCol, deleteCol: deleteCols, renameCol: () => renameColumn(),
+  sortAsc: () => sortBy(1), sortDesc: () => sortBy(-1), clearView,
+  toggleFilters: () => { settings.filters = !settings.filters; applySettings(); },
+  toggleHeader: () => { const sh = sheet(); doOp({t: 'header', on: !sh.header}); },
+  viewTable: () => setView('table'), viewSplit: () => setView('split'), viewChart: () => setView('chart'),
+  togglePanels: () => { settings.dock = !settings.dock; applySettings(); },
+  toggleCompact: () => { settings.compact = !settings.compact; applySettings(); },
+  exportChart, settings: () => openSettings(),
+  langAuto: () => setPref('lang', 'auto'), langEn: () => setPref('lang', 'en'), langDe: () => setPref('lang', 'de'),
+  themeDark: () => setPref('theme', 'dark'), themeLight: () => setPref('theme', 'light'),
+  themeGithub: () => setPref('theme', 'github'), themeGithubDark: () => setPref('theme', 'github-dark'),
+  shortcuts: () => {
+    let h = '';
+    MENUS.forEach(([m, items]) => {
+      const rows = items.filter(it => Array.isArray(it) && it[1]);
+      if (rows.length) h += `<h4>${esc(t('menu.' + m))}</h4><table>` + rows.map(it => `<tr><td>${esc(t('a.' + it[0]))}</td><td><kbd>${esc(fmtKey(it[1]))}</kbd></td></tr>`).join('') + '</table>';
+    });
+    h += `<h4>${esc(t('sc.grid'))}</h4><table>` + [['sc.move', 'sc.moveKey'], ['sc.extend', 'sc.extendKey'], ['sc.edit', 'sc.editKey'], ['sc.paste', 'sc.pasteKey'], ['sc.width', 'sc.widthKey']]
+      .map(([a, b]) => `<tr><td>${esc(t(a))}</td><td>${esc(t(b))}</td></tr>`).join('') + '</table>';
+    modal(t('a.shortcuts'), h);
+  },
+  about: async () => {
+    const v = invoke ? await window.__TAURI__.app.getVersion().catch(() => '') : '';
+    modal(t('a.about'), `${v ? `<p><b>${t('about.version', {v: esc(v)})}</b></p>` : ''}<p>${t('about.p1')}</p><p>${t('about.p2')}</p><p>${t('about.p3')}</p>`);
+  }
+};
+// [action, shortcut, checked(), handledElsewhere]
+const MENUS = [
+  ['file', [['openFile', 'Ctrl+O'], ['newTable', 'Alt+N'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], ['exportAs', 'Ctrl+E'], '-', ['closeTab', 'Alt+W']]],
+  ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['copy', 'Ctrl+C', null, true], ['selectAll', 'Ctrl+A', null, true], '-',
+    ['editCell', 'F2', null, true], ['clearCells', 'Delete', null, true], '-', ['find', 'Ctrl+F']]],
+  ['data', [['insertRow', 'Ctrl+Enter'], ['deleteRows', 'Ctrl+-'], ['insertCol', 'Ctrl+Shift+Enter'], ['deleteCol', 'Ctrl+Shift+-'], ['renameCol'], '-',
+    ['sortAsc', 'Alt+ArrowUp'], ['sortDesc', 'Alt+ArrowDown'], ['toggleFilters', 'Ctrl+Shift+F', () => settings.filters], ['clearView', 'Ctrl+Shift+L'], '-',
+    ['toggleHeader', null, () => sheet() && sheet().header]]],
+  ['view', [['viewTable', 'Alt+1', () => settings.view === 'table'], ['viewSplit', 'Alt+2', () => settings.view === 'split'],
+    ['viewChart', 'Alt+3', () => settings.view === 'chart'], '-', ['togglePanels', 'Ctrl+\\', () => settings.dock],
+    ['toggleCompact', null, () => settings.compact], '-', ['exportChart']]],
+  ['settings', [['settings', 'Ctrl+,'], '-', '#menu.language',
+    ['langAuto', null, () => settings.lang === 'auto'], ['langEn', null, () => settings.lang === 'en'], ['langDe', null, () => settings.lang === 'de'],
+    '-', '#menu.theme',
+    ['themeDark', null, () => settings.theme === 'dark'], ['themeLight', null, () => settings.theme === 'light'],
+    ['themeGithub', null, () => settings.theme === 'github'], ['themeGithubDark', null, () => settings.theme === 'github-dark']]],
+  ['help', [['shortcuts'], '-', ['about']]]
+];
+const KEYMAP = {};
+MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
+const NO_DOC = new Set(['openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
+  'themeGithubDark', 'shortcuts', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
+const allowed = act => !!cur() || NO_DOC.has(act);
+function run(act) { if (allowed(act)) A[act](); }
+function syncDisabled() { $$('[data-act]').forEach(b => b.disabled = !allowed(b.dataset.act)); $('#globalSearch').disabled = !cur(); }
+
+let menuOpen = null;
+function openMenu(m, items) {
+  closeMenus();
+  const dd = m.querySelector('.dropdown'); dd.innerHTML = '';
+  items.forEach(it => {
+    if (it === '-') return dd.append(document.createElement('hr'));
+    if (typeof it === 'string') { const l = document.createElement('div'); l.className = 'dd-label'; l.textContent = t(it.slice(1)); return dd.append(l); }
+    const [act, key, check] = it, b = document.createElement('button');
+    b.innerHTML = `<span class="chk">${check && check() ? '&#10003;' : ''}</span><span>${esc(t('a.' + act))}</span><kbd>${esc(key ? fmtKey(key) : '')}</kbd>`;
+    b.disabled = !allowed(act);
+    b.onmousedown = e => e.preventDefault();
+    b.onclick = () => { closeMenus(); run(act); };
+    dd.append(b);
+  });
+  m.classList.add('open'); menuOpen = m;
+}
+function closeMenus() { $$('.menu.open').forEach(x => x.classList.remove('open')); menuOpen = null; }
+function buildMenubar() {
+  const nav = $('#menus'); nav.innerHTML = ''; menuOpen = null;
+  MENUS.forEach(([name, items]) => {
+    const m = document.createElement('div'), b = document.createElement('button'), dd = document.createElement('div');
+    m.className = 'menu'; dd.className = 'dropdown'; b.textContent = t('menu.' + name);
+    b.onmousedown = e => e.preventDefault();
+    b.onclick = () => menuOpen === m ? closeMenus() : openMenu(m, items);
+    b.onmouseenter = () => { if (menuOpen && menuOpen !== m) openMenu(m, items); };
+    m.append(b, dd); nav.append(m);
+  });
+}
+document.addEventListener('mousedown', e => { if (menuOpen && !e.target.closest('.menu')) closeMenus(); });
+const keyOf = act => { for (const [, items] of MENUS) for (const it of items) if (Array.isArray(it) && it[0] === act && it[1]) return it[1]; return ''; };
+const tip = act => t('a.' + act) + (keyOf(act) ? ` (${fmtKey(keyOf(act))})` : '');
+function makeBtn(act, html) {
+  const b = document.createElement('button');
+  b.className = 'ibtn'; b.innerHTML = html; b.title = tip(act); b.dataset.act = act;
+  return b;
+}
+function buildToolbars() {
+  const fill = (id, list) => { const box = $(id); box.innerHTML = ''; list.forEach(([a, i]) => box.append(makeBtn(a, i))); };
+  fill('#fileBtns', [['openFile', ICONS.open], ['newTable', ICONS.newt], ['save', ICONS.save], ['undo', ICONS.undo], ['redo', ICONS.redo], ['exportAs', ICONS.export]]);
+  fill('#viewBtns', [['toggleCompact', ICONS.rows], ['togglePanels', ICONS.panel], ['settings', ICONS.gear], ['shortcuts', ICONS.help]]);
+  const tools = $('#tools'); tools.innerHTML = '';
+  [['insertRow', ICONS.rowAdd], ['deleteRows', ICONS.rowDel], ['insertCol', ICONS.colAdd], ['deleteCol', ICONS.colDel], '-',
+    ['sortAsc', ICONS.sortAsc], ['sortDesc', ICONS.sortDesc], ['toggleFilters', ICONS.filter], ['clearView', ICONS.clear], '-', ['viewSplit', ICONS.chart]]
+    .forEach(r => { if (r === '-') { const s = document.createElement('div'); s.className = 'sep'; tools.append(s); } else tools.append(makeBtn(...r)); });
+  $('#viewSeg').innerHTML = [['viewTable', 'ui.table'], ['viewSplit', 'ui.split'], ['viewChart', 'ui.chart']]
+    .map(([a, l]) => `<button data-act="${a}" title="${esc(tip(a))}">${esc(t(l))}</button>`).join('');
+}
+document.addEventListener('mousedown', e => { if (e.target.closest('.ibtn,.cta,#viewSeg button')) e.preventDefault(); });
+document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b && !b.disabled) run(b.dataset.act); });
+$$('#dockTabs button').forEach(b => b.onclick = () => { settings.dock = true; settings.dockTab = b.dataset.tab; applySettings(); });
+
+function comboOf(e) {
+  let k = e.key;
+  if (/^Digit\d$/.test(e.code)) k = e.code.slice(5);
+  else if (e.code === 'Minus' || e.code === 'NumpadSubtract') k = '-';
+  else if (e.code === 'Comma') k = ',';
+  else if (e.code === 'Backslash' || e.code === 'IntlBackslash') k = '\\';
+  else if (k.length === 1) k = k.toUpperCase();
+  return (e.ctrlKey || e.metaKey ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + k;
+}
+const typing = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); };
+const EDIT_ACTS = new Set(['undo', 'redo', 'insertRow', 'deleteRows', 'insertCol', 'deleteCol']);
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if ($('#modal').classList.contains('show')) { e.preventDefault(); closeModal(); }
+    else if (menuOpen) closeMenus();
+    return;
+  }
+  if (e.key === 'F5' || (e.ctrlKey && e.key.toLowerCase() === 'r')) { e.preventDefault(); return; }   // no accidental reload
+  if (e.ctrlKey && e.altKey) return;   // AltGr on international keyboards types characters
+  const act = KEYMAP[comboOf(e)];
+  if (!act || (typing() && EDIT_ACTS.has(act))) return;
+  e.preventDefault(); e.stopPropagation(); run(act);
+}, true);
+
+/* ================= Modal, toast, settings ================= */
+function modal(title, html, buttons = null) {
+  $('.modal').classList.remove('wide'); settingsOpen = false;
+  $('#modalTitle').textContent = title; $('#modalBody').innerHTML = html;
+  const foot = $('#modalFoot');
+  foot.hidden = !buttons; foot.innerHTML = '';
+  if (buttons) {
+    foot.append(Object.assign(document.createElement('span'), {className: 'flex'}));
+    buttons.forEach(b => { const el = document.createElement('button'); el.className = 'btn-sm' + (b.primary ? ' primary' : ''); el.textContent = b.label; el.onclick = b.onClick; foot.append(el); });
+  }
+  $('#modal').classList.add('show');
+}
+function closeModal() { $('#modal').classList.remove('show'); settingsOpen = false; }
+$('#modalClose').onclick = closeModal;
+let toastT;
+function toast(msg) { const el = $('#toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2600); }
+async function ask(message, okLabel) {
+  return invoke ? invoke('confirm', {title: t('confirm.title'), message, okLabel, cancelLabel: t('confirm.cancel')}) : confirm(message);
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('.modal-body a[href^="http"]'); if (!a) return;
+  e.preventDefault();
+  if (invoke) invoke('open_url', {url: a.href}).catch(err => toast(t('toast.linkFail', {e: err}))); else window.open(a.href, '_blank', 'noopener');
+});
+
+let settingsOpen = false, prefsSection = 'general';
+function setPref(k, v) { settings[k] = v; applySettings(); }
+function openSettings() {
+  $('#modalFoot').hidden = false; renderSettings();
+  $('.modal').classList.add('wide'); settingsOpen = true; $('#modal').classList.add('show');
+}
+function renderSettings() {
+  const opt = (v, label, cv) => `<option value="${v}"${v === cv ? ' selected' : ''}>${esc(label)}</option>`;
+  const sw = (name, label) => `<label class="switch"><input type="checkbox" data-sw="${name}"${settings[name] ? ' checked' : ''}><span></span>${esc(label)}</label>`;
+  const mock = th => `<div class="tc-mock" data-theme="${th}"><div class="tc-bar"><i></i><i></i><i></i><b></b></div><div class="tc-body"><div class="tc-rail"></div>
+    <div class="tc-grid">${Array.from({length: 28}, (_, i) => `<i class="${i < 4 ? 'h' : ''}"></i>`).join('')}</div><div class="tc-dock"></div></div></div>`;
+  const body = {
+    general: `<h3>${t('set.language')}</h3><p class="hint">${t('set.languageHint')}</p>
+      <select class="wide-sel" data-sel="lang">${opt('auto', t('a.langAuto'), settings.lang)}${opt('en', 'English', settings.lang)}${opt('de', 'Deutsch', settings.lang)}</select>
+      <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('reopen', t('set.reopen'))}`,
+    appearance: `<h3>${t('set.theme')}</h3><div class="theme-grid">` + THEMES.map(th =>
+      `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
+       <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') + `</div>`,
+    table: `<h3>${t('set.numbers')}</h3><select class="wide-sel" data-sel="numLocal">${opt('raw', t('set.numRaw'), settings.numLocal ? 'local' : 'raw')}${opt('local', t('set.numLocal'), settings.numLocal ? 'local' : 'raw')}</select>
+      <h3>${t('set.layout')}</h3>${sw('compact', t('set.compact'))}`
+  };
+  $('#modalTitle').textContent = t('set.title');
+  $('#modalBody').innerHTML = `<div class="prefs"><nav>${['general', 'appearance', 'table'].map(k =>
+    `<button data-sec="${k}" class="${k === prefsSection ? 'active' : ''}">${esc(t('set.' + k))}</button>`).join('')}</nav><section>${body[prefsSection]}</section></div>`;
+  $('#modalFoot').innerHTML = `<button class="btn-sm" data-pref="reset">${esc(t('set.reset'))}</button><span class="flex"></span>
+    <button class="btn-sm primary" data-pref="done">${esc(t('set.done'))}</button>`;
+}
+$('#modal').addEventListener('click', e => {
+  if (!settingsOpen) return;
+  const el = e.target.closest('[data-sec],[data-theme-pick],[data-pref]'); if (!el) return;
+  if (el.dataset.sec) prefsSection = el.dataset.sec;
+  else if (el.dataset.themePick) settings.theme = el.dataset.themePick;
+  else if (el.dataset.pref === 'done') return closeModal();
+  else if (el.dataset.pref === 'reset') { settings = {...DEF}; toast(t('set.resetDone')); }
+  applySettings(); renderSettings();
+});
+$('#modal').addEventListener('change', e => {
+  if (!settingsOpen) return;
+  const d = e.target.dataset;
+  if (d.sel) { settings[d.sel] = d.sel === 'numLocal' ? e.target.value === 'local' : e.target.value; applySettings(); renderSettings(); }
+  if (d.sw) { settings[d.sw] = e.target.checked; applySettings(); }
+});
+$('#modal').onmousedown = e => { if (e.target.id === 'modal') closeModal(); };
+
+function applyLanguage() {
+  document.documentElement.lang = lang;
+  $$('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+  $$('[data-i18n-ph]').forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  buildMenubar(); buildToolbars();
+  if (booted) { renderTabs(); renderRecent(); refresh(); updateUI(); syncDisabled(); }
+}
+let lastView = null;
+function applySettings() {
+  if (!THEMES.includes(settings.theme)) settings.theme = 'dark';
+  const nl = effectiveLang();
+  if (nl !== lang) { lang = nl; applyLanguage(); }
+  document.documentElement.dataset.theme = settings.theme;
+  document.body.classList.toggle('compact', settings.compact);
+  $('#work').className = 'work mode-' + settings.view;
+  $$('#viewSeg button').forEach(b => b.classList.toggle('active', b.dataset.act === 'view' + settings.view[0].toUpperCase() + settings.view.slice(1)));
+  $$('[data-act="toggleFilters"]').forEach(b => b.classList.toggle('active', settings.filters));
+  $$('[data-act="toggleCompact"]').forEach(b => b.classList.toggle('active', settings.compact));
+  $('#dock').classList.toggle('hidden', !settings.dock);
+  $$('#dockTabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === settings.dockTab));
+  $$('.dpanel').forEach(p => p.classList.toggle('active', p.dataset.panel === settings.dockTab));
+  if (booted) { refresh(); syncDisabled(); }
+  lastView = settings.view;
+  saveState();
+}
+
+/* ================= Drag & drop ================= */
+let dragDepth = 0;
+const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+window.addEventListener('dragenter', e => { if (hasFiles(e)) { dragDepth++; $('#drop').classList.add('show'); } });
+window.addEventListener('dragleave', e => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; $('#drop').classList.remove('show'); } });
+window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', async e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); dragDepth = 0; $('#drop').classList.remove('show');
+  const list = [];
+  for (const f of e.dataTransfer.files) list.push({name: f.name, size: f.size, path: null, bytes: new Uint8Array(await f.arrayBuffer())});
+  openFiles(list);
+});
+
+/* ================= Native right-click menus (see native.js) ================= */
+if (window.Native) {
+  const item = (act, extra = {}) => ({id: act, label: t('a.' + act), accel: keyOf(act) || null, enabled: allowed(act), ...extra});
+  let ctxTab = -1;
+  Native.setProvider(e => {
+    const tab = e.target.closest('.tab');
+    if (tab) {
+      ctxTab = [...$('#tabs').children].indexOf(tab);
+      return [{id: 'tab:close', label: t('a.closeTab'), accel: 'Alt+W'}, {id: 'tab:others', label: t('ctx.closeOthers'), enabled: docs.length > 1}];
+    }
+    const sh = sheet(); if (!sh) return null;
+    if (e.target.closest('#chart')) return [item('exportChart')];
+    const cell = e.target.closest('.g-cell'), th = e.target.closest('.g-th'), rn = e.target.closest('.g-num');
+    if (!cell && !th && !rn) return null;
+    stopEdit(true); grid.focus({preventScroll: true});
+    const {r0, r1, c0, c1} = selRange(sh.sel), s = sh.sel;
+    const clip = [{id: 'ctx:cut', label: t('ctx.cut'), accel: 'Ctrl+X'}, {id: 'ctx:copy', label: t('a.copy'), accel: 'Ctrl+C'}, {id: 'ctx:paste', label: t('ctx.paste'), accel: 'Ctrl+V'}];
+    if (cell) {
+      const r = +cell.dataset.r, c = +cell.dataset.c;
+      if (r < r0 || r > r1 || c < c0 || c > c1) setSel(r, c);
+      const v = rawText(sh.rows[sh.view[s.fr]][s.fc]);
+      return [...clip, null, item('insertRow'), item('deleteRows'), null, item('insertCol'), item('deleteCol'), item('renameCol'), null,
+        item('sortAsc'), item('sortDesc'), {id: 'ctx:filterValue', label: t('ctx.filterValue', {v: v ? (v.length > 28 ? v.slice(0, 28) + '…' : v) : t('ctx.emptyValue')})},
+        null, item('clearCells')];
+    }
+    if (th) {
+      const c = +th.dataset.c;
+      if (c < c0 || c > c1 || r0 !== 0) { s.ac = s.fc = c; s.ar = 0; s.fr = Math.max(0, sh.view.length - 1); renderGrid(); updateUI(); buildColPanel(); }
+      return [item('sortAsc'), item('sortDesc'), null, item('renameCol'), item('insertCol'), item('deleteCol'), null, item('toggleFilters', {checked: settings.filters})];
+    }
+    const r = +rn.dataset.r;
+    if (r < r0 || r > r1) { s.ar = s.fr = r; s.ac = 0; s.fc = sh.cols.length - 1; renderGrid(); updateUI(); }
+    return [...clip, null, item('insertRow'), item('deleteRows')];
+  });
+  Native.setHandler(async id => {
+    if (id === 'tab:close') return closeTab(ctxTab);
+    if (id === 'tab:others') { const keep = docs[ctxTab]; for (const x of [...docs]) if (x !== keep) await closeTab(docs.indexOf(x)); return; }
+    if (id === 'ctx:copy' || id === 'ctx:cut') {
+      const out = selectionTsv(); if (!out) return;
+      await Native.clipboardWrite(out.text); toast(t('toast.copied', {n: num(out.n)}));
+      if (id === 'ctx:cut') clearCells();
+      return;
+    }
+    if (id === 'ctx:paste') return pasteText(await Native.clipboardRead());
+    if (id === 'ctx:filterValue') {
+      const sh = sheet(), c = sh.sel.fc;
+      sh.filters[c] = '=' + rawText(sh.rows[sh.view[sh.sel.fr]][c]);
+      settings.filters = true; applySettings(); refresh(true);
+      return;
+    }
+    run(id);
+  });
+}
+
+/* ================= Boot ================= */
+(async function boot() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE)); } catch (e) {}
+  if (saved) { settings = {...DEF, ...saved.settings}; recent = saved.recent || []; }
+  lang = effectiveLang();
+  applyLanguage();
+  booted = true;
+  applySettings(); renderTabs(); renderRecent(); updateUI(); syncDisabled();
+  if (invoke) {
+    window.__TAURI__.window.getCurrentWindow().onCloseRequested(async ev => {
+      saveState();
+      if (docs.some(d => d.dirty) && !await ask(t('confirm.quit'), t('confirm.quitOk'))) ev.preventDefault();
+    });
+    window.__TAURI__.event.listen('open-files', e => openFiles(e.payload));
+    for (const path of settings.reopen && saved && saved.open ? saved.open : []) {
+      try { await openFileInfo({path, name: path.split(/[\\/]/).pop()}); } catch (e) {}
+    }
+    if (saved && saved.active) { const i = docs.findIndex(d => d.path === saved.active); if (i >= 0) activate(i); }
+    openFiles(await invoke('initial_files'));
+  }
+})();
+
+// Exposed for automated UI tests in a browser.
+window.__dt = {openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, recompute, refresh, pasteText, settings: () => settings};
