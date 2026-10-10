@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.3 — 2026-10-10
+- "New table" now offers three formats: Excel workbook, CSV or JSON.
+
 ## 1.2.2 — 2026-10-10
 - Switching the header row on or off no longer breaks formulas: references move with their rows (like inserting or deleting a row in Excel).
 - Tables without a header row are saved to Excel without an extra row of placeholder column names, so formulas point at the right cells.

@@ -75,7 +75,7 @@ const I18N = {
     'sc.paste': 'Paste from Excel', 'sc.pasteKey': 'Ctrl+V', 'sc.width': 'Column width', 'sc.widthKey': 'Drag the header edge',
     'ctx.closeOthers': 'Close Other Tabs', 'ctx.cut': 'Cut', 'ctx.paste': 'Paste', 'ctx.filterValue': 'Show Only “{v}”', 'ctx.emptyValue': '(empty)',
     'ui.newTitle': 'New table', 'ui.create': 'Create', 'ui.new_xlsx': 'Keeps formulas and several sheets; Excel opens it directly',
-    'ui.new_csv': 'Plain text that works everywhere; formulas are stored as text and calculated by Excel',
+    'ui.new_csv': 'Plain text that works everywhere; formulas are stored as text and calculated by Excel', 'ui.new_json': 'A list of records for programs and web apps; formulas are saved as their results',
     'ui.fxPh': 'Value or formula, e.g. =SUM(A1:A10)'
   },
   de: {
@@ -147,7 +147,7 @@ const I18N = {
     'ctx.closeOthers': 'Andere Tabs schließen', 'ctx.cut': 'Ausschneiden', 'ctx.paste': 'Einfügen', 'ctx.filterValue': 'Nur „{v}“ anzeigen',
     'ctx.emptyValue': '(leer)',
     'ui.newTitle': 'Neue Tabelle', 'ui.create': 'Erstellen', 'ui.new_xlsx': 'Behält Formeln und mehrere Blätter; Excel öffnet sie direkt',
-    'ui.new_csv': 'Reiner Text, funktioniert überall; Formeln werden als Text gespeichert und von Excel berechnet',
+    'ui.new_csv': 'Reiner Text, funktioniert überall; Formeln werden als Text gespeichert und von Excel berechnet', 'ui.new_json': 'Eine Liste von Datensätzen für Programme und Web-Apps; Formeln werden als Ergebnis gespeichert',
     'ui.fxPh': 'Wert oder Formel, z. B. =SUMME(A1:A10)'
   }
 };
@@ -421,10 +421,10 @@ async function openFileInfo(f) {
 }
 async function openFiles(list) { for (const f of list) await openFileInfo(f); }
 let untitledN = 1;
-/* New table: Excel workbook (keeps formulas) or CSV (plain text). */
+/* New table: Excel workbook (keeps formulas), CSV (plain text) or JSON (list of records). */
 function newTable() {
   const opt = (v, checked) => `<label><input type="radio" name="newfmt" value="${v}"${checked ? ' checked' : ''}><span>${esc(t('fmt.' + v))}<small>${esc(t('ui.new_' + v))}</small></span></label>`;
-  modal(t('ui.newTitle'), `<div class="fmt-list">${opt('xlsx', true)}${opt('csv', false)}</div>`, [
+  modal(t('ui.newTitle'), `<div class="fmt-list">${opt('xlsx', true)}${opt('csv', false)}${opt('json', false)}</div>`, [
     {label: t('ui.cancel'), onClick: closeModal},
     {label: t('ui.create'), primary: true, onClick: () => { const f = $('input[name="newfmt"]:checked').value; closeModal(); createTable(f); }}
   ]);
@@ -433,7 +433,7 @@ function createTable(format) {
   const cols = 5, rows = Array.from({length: 20}, () => Array(cols).fill(''));
   const sh = makeSheet(format === 'xlsx' ? (lang === 'de' ? 'Tabelle1' : 'Sheet1') : t('ui.table2'), [Array.from({length: cols}, (_, i) => colName(i)), ...rows]);
   docs.push({id: ++docSeq, name: `${t('ui.untitled')}-${untitledN++}.${format}`, path: null, size: 0, format,
-    delimiter: format === 'csv' ? ',' : '', bom: false, encoding: format === 'csv' ? 'UTF-8' : '',
+    delimiter: format === 'csv' ? ',' : '', bom: false, encoding: format === 'xlsx' ? '' : 'UTF-8',
     sheets: [sh], si: 0, dirty: false, history: [], future: [], cleanDepth: 0, isNew: true});
   activate(docs.length - 1);
 }
