@@ -15,7 +15,7 @@ const I18N = {
     'menu.file': 'File', 'menu.edit': 'Edit', 'menu.data': 'Data', 'menu.format': 'Format', 'menu.view': 'View',
     'a.fmtBold': 'Bold', 'a.fmtItalic': 'Italic', 'a.fmtUnderline': 'Underline', 'a.fmtStrike': 'Strikethrough', 'a.fmtFontColor': 'Text Color…', 'a.fmtFill': 'Fill Color…',
     'a.fmtAlignLeft': 'Align Left', 'a.fmtAlignCenter': 'Center', 'a.fmtAlignRight': 'Align Right', 'a.fmtWrap': 'Wrap Text', 'a.fmtBorders': 'Borders',
-    'a.fmtNoFill': 'No Fill', 'a.fmtClear': 'Clear Formatting', 'ui.numFormat': 'Number format', 'nf.general': 'General', 'nf.text': 'Text', 'nf.custom': 'Custom: {c}',
+    'a.fmtNoFill': 'No Fill', 'a.fmtNumber': 'Number Format…', 'a.fmtClear': 'Clear Formatting', 'ui.numFormat': 'Number format', 'nf.general': 'General', 'nf.text': 'Text', 'nf.custom': 'Custom: {c}',
     'ui.fmtOnlyExcel': 'Formatting is kept in Excel workbooks (.xlsx). Save as Excel to use it.', 'menu.settings': 'Settings', 'menu.help': 'Help',
     'menu.language': 'Language', 'menu.theme': 'Theme',
     'a.openFile': 'Open…', 'a.newTable': 'New Table', 'a.save': 'Save', 'a.saveAs': 'Save As…', 'a.exportAs': 'Export…', 'a.closeTab': 'Close Tab',
@@ -86,7 +86,7 @@ const I18N = {
     'menu.file': 'Datei', 'menu.edit': 'Bearbeiten', 'menu.data': 'Daten', 'menu.format': 'Format', 'menu.view': 'Ansicht',
     'a.fmtBold': 'Fett', 'a.fmtItalic': 'Kursiv', 'a.fmtUnderline': 'Unterstrichen', 'a.fmtStrike': 'Durchgestrichen', 'a.fmtFontColor': 'Schriftfarbe…', 'a.fmtFill': 'Füllfarbe…',
     'a.fmtAlignLeft': 'Linksbündig', 'a.fmtAlignCenter': 'Zentriert', 'a.fmtAlignRight': 'Rechtsbündig', 'a.fmtWrap': 'Zeilenumbruch', 'a.fmtBorders': 'Rahmenlinien',
-    'a.fmtNoFill': 'Keine Füllung', 'a.fmtClear': 'Formatierung löschen', 'ui.numFormat': 'Zahlenformat', 'nf.general': 'Standard', 'nf.text': 'Text', 'nf.custom': 'Benutzerdefiniert: {c}',
+    'a.fmtNoFill': 'Keine Füllung', 'a.fmtNumber': 'Zahlenformat…', 'a.fmtClear': 'Formatierung löschen', 'ui.numFormat': 'Zahlenformat', 'nf.general': 'Standard', 'nf.text': 'Text', 'nf.custom': 'Benutzerdefiniert: {c}',
     'ui.fmtOnlyExcel': 'Formatierung wird in Excel-Arbeitsmappen (.xlsx) gespeichert. Als Excel speichern, um sie zu nutzen.', 'menu.settings': 'Einstellungen', 'menu.help': 'Hilfe',
     'menu.language': 'Sprache', 'menu.theme': 'Design',
     'a.openFile': 'Öffnen…', 'a.newTable': 'Neue Tabelle', 'a.save': 'Speichern', 'a.saveAs': 'Speichern unter…', 'a.exportAs': 'Exportieren…',
@@ -375,15 +375,19 @@ const toggleFlag = k => () => { const st = focusStyle(); applyFormat({[k]: st &&
 const NUM_FORMATS = ['General', '0', '0.00', '#,##0', '#,##0.00', '0%', '0.00%', '#,##0.00 "€"', '"$"#,##0.00', '0.00E+00', 'dd.mm.yyyy', 'yyyy-mm-dd', 'dd.mm.yyyy hh:mm', 'hh:mm', '@'];
 function syncFormatBar() {
   const ok = canFormat(), st = focusStyle() || {};
-  $$('#fmtBtns [data-act]').forEach(b => { b.disabled = !ok; b.title = tip(b.dataset.act) + (ok ? '' : ' — ' + t('ui.fmtOnlyExcel')); });
+  $$('#tools [data-act^="fmt"]').forEach(b => { b.disabled = !ok; b.title = tip(b.dataset.act) + (ok ? '' : ' — ' + t('ui.fmtOnlyExcel')); });
   for (const [a, k] of [['fmtBold', 'b'], ['fmtItalic', 'i'], ['fmtUnderline', 'u'], ['fmtWrap', 'wrap']]) $$(`[data-act="${a}"]`).forEach(b => b.classList.toggle('active', !!st[k]));
   for (const [a, v] of [['fmtAlignLeft', 'left'], ['fmtAlignCenter', 'center'], ['fmtAlignRight', 'right']]) $$(`[data-act="${a}"]`).forEach(b => b.classList.toggle('active', st.ha === v));
-  const sel = $('#nfSel'); if (!sel) return;
-  sel.disabled = !ok;
-  const code = st.nf || 'General';
-  if (![...sel.options].some(o => o.value === code)) { const o = document.createElement('option'); o.value = code; o.textContent = t('nf.custom', {c: code}); o.dataset.custom = 1; sel.append(o); }
-  sel.value = code;
+  if (!$('#fcBar')) return;
   $('#fcBar').style.background = st.fc || 'var(--text)'; $('#bgBar').style.background = st.bg || 'transparent';
+}
+/* Number formats: native menu with an example for each format; the current one is ticked. */
+function numberFormatMenu() {
+  if (!canFormat() || !invoke) return;
+  const code = (focusStyle() || {}).nf || 'General';
+  const list = NUM_FORMATS.includes(code) ? NUM_FORMATS : [...NUM_FORMATS, code];
+  invoke('context_menu', {items: list.map((c, i) => ({id: 'nf:' + i, label: (NUM_FORMATS.includes(c) ? nfLabel(c) : t('nf.custom', {c})) + (c === 'General' || c === '@' ? '' : '   ·   ' + c), enabled: true, checked: c === code, accel: null}))}).catch(() => {});
+  numberFormatMenu.list = list;
 }
 const nfLabel = code => code === 'General' ? t('nf.general') : code === '@' ? t('nf.text') : (XFormat.number(code.includes('y') || code.includes('h') ? new Date(2026, 9, 10, 14, 30) : code.includes('%') ? 0.255 : 1234.5, code, lang === 'de' ? 'de-DE' : 'en-US') || code);
 
@@ -1539,6 +1543,7 @@ const ICONS = {
   wrap: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h13a3 3 0 0 1 0 6h-4M15 16l-2 2 2 2M4 18h5"/></svg>',
   borders: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M12 4v16M4 12h16"/></svg>',
   fill: '<svg viewBox="0 0 24 24"><path d="m5 11 7-7 7 7-7 7z"/><path d="M19 15s2 2.2 2 3.5a2 2 0 0 1-4 0c0-1.3 2-3.5 2-3.5z"/></svg>',
+  numfmt: '<svg viewBox="0 0 24 24"><path d="M5 9h4M7 7v12M12 7h3a2 2 0 0 1 0 4h-1a2 2 0 0 0 0 4h3M17 19l2-2"/></svg>',
   eraser: '<svg viewBox="0 0 24 24"><path d="m7 21-4-4 10-10 7 7-7 7z"/><path d="M14 21h7M9 11l7 7"/></svg>',
   help: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"/></svg>'
 };
@@ -1556,7 +1561,7 @@ const A = {
   fmtAlignLeft: () => applyFormat({ha: (focusStyle() || {}).ha === 'left' ? null : 'left'}), fmtAlignCenter: () => applyFormat({ha: (focusStyle() || {}).ha === 'center' ? null : 'center'}),
   fmtAlignRight: () => applyFormat({ha: (focusStyle() || {}).ha === 'right' ? null : 'right'}),
   fmtBorders: () => applyFormat({bd: (focusStyle() || {}).bd ? 'none' : 'all'}), fmtFontColor: () => $('#fcPick').click(), fmtFill: () => $('#bgPick').click(),
-  fmtNoFill: () => applyFormat({bg: null}), fmtClear: () => applyFormat({clear: 1}),
+  fmtNoFill: () => applyFormat({bg: null}), fmtClear: () => applyFormat({clear: 1}), fmtNumber: numberFormatMenu,
   toggleHeader: () => {
     // The first row becomes the column names (or the names become row 1): formulas move with their rows, like deleting/inserting a row.
     const sh = sheet(), on = !sh.header;
@@ -1590,7 +1595,7 @@ const MENUS = [
   ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['copy', 'Ctrl+C', null, true], ['selectAll', 'Ctrl+A', null, true], '-',
     ['editCell', 'F2', null, true], ['clearCells', 'Delete', null, true], '-', ['find', 'Ctrl+F']]],
   ['format', [['fmtBold', 'Ctrl+B'], ['fmtItalic', 'Ctrl+I'], ['fmtUnderline', 'Ctrl+U'], ['fmtStrike', 'Ctrl+5'], '-',
-    ['fmtFontColor'], ['fmtFill'], ['fmtNoFill'], ['fmtBorders'], '-', ['fmtAlignLeft'], ['fmtAlignCenter'], ['fmtAlignRight'], ['fmtWrap'], '-', ['fmtClear']]],
+    ['fmtFontColor'], ['fmtFill'], ['fmtNoFill'], ['fmtBorders'], '-', ['fmtAlignLeft'], ['fmtAlignCenter'], ['fmtAlignRight'], ['fmtWrap'], '-', ['fmtNumber'], ['fmtClear']]],
   ['data', [['insertRow', 'Ctrl+Enter'], ['deleteRows', 'Ctrl+-'], ['insertCol', 'Ctrl+Shift+Enter'], ['deleteCol', 'Ctrl+Shift+-'], ['renameCol'], '-',
     ['sortAsc', 'Alt+ArrowUp'], ['sortDesc', 'Alt+ArrowDown'], ['toggleFilters', 'Ctrl+Shift+F', () => settings.filters], ['clearView', 'Ctrl+Shift+L'], '-',
     ['toggleHeader', null, () => sheet() && sheet().header]]],
@@ -1651,20 +1656,17 @@ function makeBtn(act, html) {
 function buildToolbars() {
   const fill = (id, list) => { const box = $(id); box.innerHTML = ''; list.forEach(([a, i]) => box.append(makeBtn(a, i))); };
   fill('#fileBtns', [['openFile', ICONS.open], ['newTable', ICONS.newt], ['save', ICONS.save], ['undo', ICONS.undo], ['redo', ICONS.redo], ['exportAs', ICONS.export]]);
-  const fb = $('#fmtBtns'); fb.innerHTML = '';
-  const letter = (a, html) => { const b = makeBtn(a, html); b.classList.add('txt'); return b; };
-  fb.append(letter('fmtBold', '<b>B</b>'), letter('fmtItalic', '<i style="font-family:Georgia,serif">I</i>'), letter('fmtUnderline', '<u>U</u>'),
-    letter('fmtFontColor', '<span class="cbtn">A<i id="fcBar"></i></span>'), letter('fmtFill', `<span class="cbtn">${ICONS.fill}<i id="bgBar"></i></span>`),
-    makeBtn('fmtAlignLeft', ICONS.alignL), makeBtn('fmtAlignCenter', ICONS.alignC), makeBtn('fmtAlignRight', ICONS.alignR), makeBtn('fmtWrap', ICONS.wrap), makeBtn('fmtBorders', ICONS.borders));
-  const nf = document.createElement('select'); nf.id = 'nfSel'; nf.title = t('ui.numFormat');
-  nf.innerHTML = NUM_FORMATS.map(c => `<option value="${esc(c)}">${esc(nfLabel(c))}</option>`).join('');
-  nf.onchange = () => { if (nf.value) applyFormat({nf: nf.value === 'General' ? null : nf.value}); grid.focus(); };
-  fb.append(nf, makeBtn('fmtClear', ICONS.eraser));
   fill('#viewBtns', [['toggleCompact', ICONS.rows], ['togglePanels', ICONS.panel], ['settings', ICONS.gear], ['shortcuts', ICONS.help]]);
   const tools = $('#tools'); tools.innerHTML = '';
-  [['insertRow', ICONS.rowAdd], ['deleteRows', ICONS.rowDel], ['insertCol', ICONS.colAdd], ['deleteCol', ICONS.colDel], '-',
+  // Formatting sits in the tool rail like in Markdown Studio; rows, columns and the view follow below.
+  const letter = (a, html) => { const b = makeBtn(a, html); b.classList.add('txt'); return b; };
+  [['fmtBold', '<b>B</b>', 1], ['fmtItalic', '<i style="font-family:Georgia,serif">I</i>', 1], ['fmtUnderline', '<u>U</u>', 1],
+    ['fmtFontColor', '<span class="cbtn">A<i id="fcBar"></i></span>', 1], ['fmtFill', `<span class="cbtn">${ICONS.fill}<i id="bgBar"></i></span>`, 1],
+    ['fmtAlignLeft', ICONS.alignL], ['fmtAlignCenter', ICONS.alignC], ['fmtAlignRight', ICONS.alignR], ['fmtWrap', ICONS.wrap], ['fmtBorders', ICONS.borders],
+    ['fmtNumber', ICONS.numfmt], ['fmtClear', ICONS.eraser], '-',
+    ['insertRow', ICONS.rowAdd], ['deleteRows', ICONS.rowDel], ['insertCol', ICONS.colAdd], ['deleteCol', ICONS.colDel], '-',
     ['sortAsc', ICONS.sortAsc], ['sortDesc', ICONS.sortDesc], ['toggleFilters', ICONS.filter], ['clearView', ICONS.clear], '-', ['viewSplit', ICONS.chart]]
-    .forEach(r => { if (r === '-') { const s = document.createElement('div'); s.className = 'sep'; tools.append(s); } else tools.append(makeBtn(...r)); });
+    .forEach(r => { if (r === '-') { const s = document.createElement('div'); s.className = 'sep'; tools.append(s); } else tools.append(r[2] ? letter(r[0], r[1]) : makeBtn(r[0], r[1])); });
   $('#viewSeg').innerHTML = [['viewTable', 'ui.table'], ['viewSplit', 'ui.split'], ['viewChart', 'ui.chart']]
     .map(([a, l]) => `<button data-act="${a}" title="${esc(tip(a))}">${esc(t(l))}</button>`).join('');
 }
@@ -1842,6 +1844,7 @@ if (window.Native) {
     return [...clip, null, item('insertRow'), item('deleteRows')];
   });
   Native.setHandler(async id => {
+    if (id.startsWith('nf:')) { const c = (numberFormatMenu.list || NUM_FORMATS)[+id.slice(3)]; if (c) applyFormat({nf: c === 'General' ? null : c}); return grid.focus(); }
     if (id === 'tab:close') return closeTab(ctxTab);
     if (id === 'tab:others') { const keep = docs[ctxTab]; for (const x of [...docs]) if (x !== keep) await closeTab(docs.indexOf(x)); return; }
     if (id === 'ctx:copy' || id === 'ctx:cut') {

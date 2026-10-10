@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.1 — 2026-10-10
+- The formatting tools (bold, colors, alignment, borders, number format …) are now in the tool rail on the left, like in Markdown Studio. Number formats open as a menu with an example for each format.
+
 ## 1.3.0 — 2026-10-10
 - Excel formatting: bold, italic, underline, strikethrough, text and fill colors, alignment, wrapped text, borders, fonts and sizes are shown in the table and kept when saving.
 - Number formats like in Excel: thousands separators, decimals, percent, currency (€, $), dates and times, scientific — shown in your language (1.234,50 € in German).
