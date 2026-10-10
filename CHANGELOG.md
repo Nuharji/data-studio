@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0 — 2026-10-10
+- Excel formatting: bold, italic, underline, strikethrough, text and fill colors, alignment, wrapped text, borders, fonts and sizes are shown in the table and kept when saving.
+- Number formats like in Excel: thousands separators, decimals, percent, currency (€, $), dates and times, scientific — shown in your language (1.234,50 € in German).
+- Merged cells, column widths and row heights are kept; merged cells are shown while the table isn't sorted or filtered.
+- Saving an Excel file keeps what Data Studio doesn't edit: dropdown lists, conditional formatting, frozen panes, print settings, images.
+- New Format menu and toolbar (Ctrl+B / Ctrl+I / Ctrl+U, colors, alignment, wrap, borders, number format, clear formatting) — every change can be undone.
+- Excel files are now read and written by the app's Rust core (faster, and more of the file is preserved).
 ## 1.2.5 — 2026-10-10
 - Icon fades swapped: dark themes now show the dark fade and light themes the light fade — in the menu bar, on the start screen and in the taskbar.
 

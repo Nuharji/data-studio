@@ -12,7 +12,11 @@ const PALETTE = ['#12A06B', '#378EF0', '#E5384F', '#F08A1C', '#7B4DFF', '#22B8B0
 /* ================= Translations ================= */
 const I18N = {
   en: {
-    'menu.file': 'File', 'menu.edit': 'Edit', 'menu.data': 'Data', 'menu.view': 'View', 'menu.settings': 'Settings', 'menu.help': 'Help',
+    'menu.file': 'File', 'menu.edit': 'Edit', 'menu.data': 'Data', 'menu.format': 'Format', 'menu.view': 'View',
+    'a.fmtBold': 'Bold', 'a.fmtItalic': 'Italic', 'a.fmtUnderline': 'Underline', 'a.fmtStrike': 'Strikethrough', 'a.fmtFontColor': 'Text Color…', 'a.fmtFill': 'Fill Color…',
+    'a.fmtAlignLeft': 'Align Left', 'a.fmtAlignCenter': 'Center', 'a.fmtAlignRight': 'Align Right', 'a.fmtWrap': 'Wrap Text', 'a.fmtBorders': 'Borders',
+    'a.fmtNoFill': 'No Fill', 'a.fmtClear': 'Clear Formatting', 'ui.numFormat': 'Number format', 'nf.general': 'General', 'nf.text': 'Text', 'nf.custom': 'Custom: {c}',
+    'ui.fmtOnlyExcel': 'Formatting is kept in Excel workbooks (.xlsx). Save as Excel to use it.', 'menu.settings': 'Settings', 'menu.help': 'Help',
     'menu.language': 'Language', 'menu.theme': 'Theme',
     'a.openFile': 'Open…', 'a.newTable': 'New Table', 'a.save': 'Save', 'a.saveAs': 'Save As…', 'a.exportAs': 'Export…', 'a.closeTab': 'Close Tab',
     'a.undo': 'Undo', 'a.redo': 'Redo', 'a.copy': 'Copy', 'a.selectAll': 'Select All', 'a.editCell': 'Edit Cell', 'a.clearCells': 'Clear Cells',
@@ -79,7 +83,11 @@ const I18N = {
     'ui.fxPh': 'Value or formula, e.g. =SUM(A1:A10)'
   },
   de: {
-    'menu.file': 'Datei', 'menu.edit': 'Bearbeiten', 'menu.data': 'Daten', 'menu.view': 'Ansicht', 'menu.settings': 'Einstellungen', 'menu.help': 'Hilfe',
+    'menu.file': 'Datei', 'menu.edit': 'Bearbeiten', 'menu.data': 'Daten', 'menu.format': 'Format', 'menu.view': 'Ansicht',
+    'a.fmtBold': 'Fett', 'a.fmtItalic': 'Kursiv', 'a.fmtUnderline': 'Unterstrichen', 'a.fmtStrike': 'Durchgestrichen', 'a.fmtFontColor': 'Schriftfarbe…', 'a.fmtFill': 'Füllfarbe…',
+    'a.fmtAlignLeft': 'Linksbündig', 'a.fmtAlignCenter': 'Zentriert', 'a.fmtAlignRight': 'Rechtsbündig', 'a.fmtWrap': 'Zeilenumbruch', 'a.fmtBorders': 'Rahmenlinien',
+    'a.fmtNoFill': 'Keine Füllung', 'a.fmtClear': 'Formatierung löschen', 'ui.numFormat': 'Zahlenformat', 'nf.general': 'Standard', 'nf.text': 'Text', 'nf.custom': 'Benutzerdefiniert: {c}',
+    'ui.fmtOnlyExcel': 'Formatierung wird in Excel-Arbeitsmappen (.xlsx) gespeichert. Als Excel speichern, um sie zu nutzen.', 'menu.settings': 'Einstellungen', 'menu.help': 'Hilfe',
     'menu.language': 'Sprache', 'menu.theme': 'Design',
     'a.openFile': 'Öffnen…', 'a.newTable': 'Neue Tabelle', 'a.save': 'Speichern', 'a.saveAs': 'Speichern unter…', 'a.exportAs': 'Exportieren…',
     'a.closeTab': 'Tab schließen', 'a.undo': 'Rückgängig', 'a.redo': 'Wiederholen', 'a.copy': 'Kopieren', 'a.selectAll': 'Alles auswählen',
@@ -285,6 +293,100 @@ function cmpKeys(a, b) {
   return collator.compare(a, b);
 }
 
+/* ================= Excel formatting (see xformat.js for display, src-tauri/src/xlsx.rs for files) ================= */
+const isDarkTheme = () => settings.theme === 'dark' || settings.theme === 'github-dark';
+const FLAGS = ['b', 'i', 'u', 's', 'wrap'];
+/* A cell's style reference: a style id from the file, or {base: id, set: {changes}} after editing. */
+function styleOf(d, ref) {
+  if (ref == null || !d) return null;
+  const table = d.xstyles || [{}];
+  if (typeof ref === 'number') return table[ref] || null;
+  let st = {...(table[ref.base] || {})};
+  for (const [k, v] of Object.entries(ref.set || {})) {
+    if (k === 'clear') { st = {}; continue; }
+    if (k === 'bd') { if (v === 'all') st.bd = {t: ['thin'], r: ['thin'], b: ['thin'], l: ['thin']}; else delete st.bd; continue; }
+    if (k === 'nf') { if (v) { st.nf = v; st.date = XFormat.isDateCode(v) ? 1 : 0; } else { delete st.nf; delete st.date; } continue; }
+    if (v == null || (FLAGS.includes(k) && !v)) delete st[k]; else st[k] = v;
+  }
+  return st;
+}
+const withSet = (ref, set) => {
+  if (ref == null) return {base: 0, set: {...set}};
+  if (typeof ref === 'number') return {base: ref, set: {...set}};
+  return {base: ref.base, set: {...ref.set, ...set}};
+};
+/* Text shown in a cell: the cell's number format first (thousands separators, %, €, dates …), else the normal display. */
+function shownCell(sh, i, c, st) {
+  if (st && st.nf) {
+    const v = cellValue(sh, i, c);
+    if (typeof v === 'number' || v instanceof Date) { const f = XFormat.number(v, st.nf, lang === 'de' ? 'de-DE' : 'en-US'); if (f != null) return f; }
+  }
+  return displayCell(sh, i, c);
+}
+function mergeMaps(sh) {
+  const anchors = new Map(), covered = new Set();
+  for (const m of sh.merges) {
+    if (m.r < 0) continue;
+    anchors.set(m.r + ',' + m.c, m);
+    for (let r = m.r; r < m.r + m.rs; r++) for (let c = m.c; c < m.c + m.cs; c++) if (r !== m.r || c !== m.c) covered.add(r + ',' + c);
+  }
+  return {anchors, covered};
+}
+function shiftFmtCols(sh, at, delta) {
+  const shift = f => {
+    if (!f) return f;
+    const out = {};
+    for (const [k, v] of Object.entries(f)) { const c = +k; if (delta < 0 && c === at) continue; out[c >= at ? c + delta : c] = v; }
+    return out;
+  };
+  sh.rows.forEach(r => { if (r.fmt) r.fmt = shift(r.fmt); });
+  if (sh.headFmt) sh.headFmt = shift(sh.headFmt);
+}
+/* Where merged areas end up after an operation: rows are followed by identity (row arrays), columns by position. */
+function remapMerges(sh, op, before, rowsBefore) {
+  const pos = new Map(sh.rows.map((r, i) => [r, i]));
+  const newRow = r => r < 0 ? (op.t === 'header' ? (sh.header ? r : 0) : r) : (pos.has(rowsBefore[r]) ? pos.get(rowsBefore[r]) : (op.t === 'header' && sh.header && r === 0 ? -1 : null));
+  const out = [];
+  for (const m of before) {
+    let c = m.c, cs = m.cs;
+    if (op.t === 'col+') { if (op.at <= m.c) c++; else if (op.at < m.c + m.cs) cs++; }
+    if (op.t === 'col-') { if (op.at < m.c) c--; else if (op.at < m.c + m.cs) { if (cs === 1) continue; cs--; } }
+    const r0 = newRow(m.r), r1 = newRow(m.r + m.rs - 1);
+    if (r0 == null || r1 == null || r1 < r0) continue;
+    out.push({r: r0, c, rs: r1 - r0 + 1, cs});
+  }
+  return out;
+}
+const canFormat = () => { const d = cur(); return !!d && ['xlsx', 'xlsm'].includes(d.format) && !!invoke; };
+function applyFormat(set) {
+  const sh = sheet(); if (!sh || !canFormat()) return;
+  stopEdit(true);
+  const {r0, r1, c0, c1} = selRange(sh.sel), ch = [];
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const i = sh.view[r], row = sh.rows[i]; if (!row) continue;
+    const o = row.fmt ? row.fmt[c] : undefined;
+    ch.push({r: i, c, o, n: set.clear ? undefined : withSet(o, set)});
+  }
+  if (ch.length) doOp({t: 'fmt', ch});
+  syncFormatBar();
+}
+const focusStyle = () => { const sh = sheet(); if (!sh || !sh.view.length) return null; const row = sh.rows[sh.view[sh.sel.fr]]; return row && row.fmt ? styleOf(cur(), row.fmt[sh.sel.fc]) : null; };
+const toggleFlag = k => () => { const st = focusStyle(); applyFormat({[k]: st && st[k] ? 0 : 1}); };
+const NUM_FORMATS = ['General', '0', '0.00', '#,##0', '#,##0.00', '0%', '0.00%', '#,##0.00 "€"', '"$"#,##0.00', '0.00E+00', 'dd.mm.yyyy', 'yyyy-mm-dd', 'dd.mm.yyyy hh:mm', 'hh:mm', '@'];
+function syncFormatBar() {
+  const ok = canFormat(), st = focusStyle() || {};
+  $$('#fmtBtns [data-act]').forEach(b => { b.disabled = !ok; b.title = tip(b.dataset.act) + (ok ? '' : ' — ' + t('ui.fmtOnlyExcel')); });
+  for (const [a, k] of [['fmtBold', 'b'], ['fmtItalic', 'i'], ['fmtUnderline', 'u'], ['fmtWrap', 'wrap']]) $$(`[data-act="${a}"]`).forEach(b => b.classList.toggle('active', !!st[k]));
+  for (const [a, v] of [['fmtAlignLeft', 'left'], ['fmtAlignCenter', 'center'], ['fmtAlignRight', 'right']]) $$(`[data-act="${a}"]`).forEach(b => b.classList.toggle('active', st.ha === v));
+  const sel = $('#nfSel'); if (!sel) return;
+  sel.disabled = !ok;
+  const code = st.nf || 'General';
+  if (![...sel.options].some(o => o.value === code)) { const o = document.createElement('option'); o.value = code; o.textContent = t('nf.custom', {c: code}); o.dataset.custom = 1; sel.append(o); }
+  sel.value = code;
+  $('#fcBar').style.background = st.fc || 'var(--text)'; $('#bgBar').style.background = st.bg || 'transparent';
+}
+const nfLabel = code => code === 'General' ? t('nf.general') : code === '@' ? t('nf.text') : (XFormat.number(code.includes('y') || code.includes('h') ? new Date(2026, 9, 10, 14, 30) : code.includes('%') ? 0.255 : 1234.5, code, lang === 'de' ? 'de-DE' : 'en-US') || code);
+
 /* ================= Reading files ================= */
 const SHEET_EXT = ['xlsx', 'xlsm', 'xls', 'ods'], TEXT_EXT = ['csv', 'tsv', 'tab', 'txt', 'json', 'jsonl', 'ndjson'];
 const extOf = name => (name.split('.').pop() || '').toLowerCase();
@@ -348,8 +450,34 @@ function jsonToAoa(data) {
   }
   return [['value'], [data]];
 }
-function parseFile(bytes, name) {
+/* Excel workbooks are read in Rust (xlsx.rs) with their formatting: values, formulas, a style table, merged cells,
+   column widths and row heights. Cell styles hang on the row arrays (row.fmt[col]), so they move with sorting, inserting and deleting. */
+async function parseXlsx(bytes, ext) {
+  const m = await invoke('xlsx_read', bytes);
+  const sheets = m.sheets.map(s => {
+    const rows = Math.max(1, s.rows), cols = Math.max(1, s.cols);
+    const aoa = Array.from({length: rows}, () => Array(cols).fill('')), fmt = [];
+    for (const [r, c, kind, v, st] of s.cells) {
+      if (r >= rows || c >= cols) continue;
+      aoa[r][c] = kind === 'f' ? '=' + v : kind === 'd' ? XFormat.fromSerial(v) : v;
+      if (st) (fmt[r] = fmt[r] || {})[c] = st;
+    }
+    const sh = makeSheet(s.name, aoa, true, true);
+    // Empty header cells get a placeholder name (A, B, …) in the app, but stay empty in the file.
+    sh.cols.forEach((col, c) => { if (!rawText(aoa[0][c]).trim()) col.autoName = true; });
+    sh.headFmt = fmt[0] || {};
+    sh.rows.forEach((row, i) => { if (fmt[i + 1]) row.fmt = fmt[i + 1]; });
+    for (const [r, h] of s.heights) { if (r === 0) sh.headHt = h; else if (sh.rows[r - 1]) sh.rows[r - 1].ht = h; }
+    for (const [c, w, hidden] of s.widths) if (sh.cols[c]) { sh.cols[c].xw = w; sh.cols[c].xhidden = hidden; }
+    sh.merges = s.merges.map(([r, c, rs, cs]) => ({r: r - 1, c, rs, cs}));
+    measureCols(sh);
+    return sh;
+  });
+  return {format: ext, sheets, encoding: '', delimiter: '', bom: false, xtoken: m.token, xstyles: m.styles};
+}
+async function parseFile(bytes, name) {
   const ext = extOf(name), base = name.replace(/\.[^.]+$/, '');
+  if ((ext === 'xlsx' || ext === 'xlsm') && invoke) return parseXlsx(bytes, ext);
   if (SHEET_EXT.includes(ext)) {
     const wb = XLSX.read(bytes, {type: 'array', cellDates: true, cellFormula: true});
     const sheets = wb.SheetNames.map(n => {
@@ -413,7 +541,7 @@ async function openFileInfo(f) {
   let bytes;
   try { bytes = f.bytes || await readPath(f.path); } catch (e) { return toast(t('toast.missing', {name: f.name})); }
   let parsed;
-  try { parsed = parseFile(bytes, f.name); } catch (e) { return toast(t('toast.openFail', {name: f.name, e: e.message || e})); }
+  try { parsed = await parseFile(bytes, f.name); } catch (e) { return toast(t('toast.openFail', {name: f.name, e: e.message || e})); }
   docs.push({id: ++docSeq, name: f.name, path: f.path || null, size: f.size || bytes.length, ...parsed, si: 0,
     dirty: false, history: [], future: [], cleanDepth: 0});
   addRecent(f.path, f.name);
@@ -452,6 +580,7 @@ function activate(i) {
 async function closeTab(i) {
   const d = docs[i];
   if (d.dirty && !await ask(t('confirm.close', {name: d.name}), t('confirm.ok'))) return;
+  if (d.xtoken && invoke) invoke('xlsx_forget', {token: d.xtoken}).catch(() => {});
   docs.splice(i, 1);
   let next = active;
   if (i < active) next--; else if (i === active) next = Math.min(active, docs.length - 1);
@@ -552,6 +681,8 @@ function measureCols(sh) {
   measureCtx.font = '12px "Segoe UI", system-ui, sans-serif';
   const n = sh.rows.length, step = Math.max(1, Math.floor(n / 300));
   sh.cols.forEach((col, c) => {
+    // Widths set in Excel (units ≈ characters) are kept.
+    if (col.xw != null) { col.width = Math.round(clamp(col.xw * 7 + 5, 24, 1200)); return; }
     let w = measureCtx.measureText(col.name).width * 1.08 + 90;   // room for the type badge and sort button
     for (let i = 0; i < n; i += step) w = Math.max(w, measureCtx.measureText(rawText(sh.rows[i][c]).slice(0, 80)).width + 22);
     col.width = Math.round(clamp(w, 64, 380));
@@ -584,6 +715,9 @@ function renderGrid() {
   const pad = `<div style="width:${xs[c0] || 0}px;flex:none"></div>`;
   const R0 = Math.min(s.ar, s.fr), R1 = Math.max(s.ar, s.fr), C0 = Math.min(s.ac, s.fc), C1 = Math.max(s.ac, s.fc);
   const focusEl = document.activeElement, fCol = focusEl && focusEl.dataset && focusEl.dataset.f, fPos = fCol != null ? focusEl.selectionStart : 0;
+  const d = cur(), dark = isDarkTheme();
+  // Merged cells are shown while the rows are in their original order (no sorting or filtering).
+  const merged = sh.merges && sh.merges.length && sh.view.length === sh.rows.length && !sh.sort.dir && sh.view.every((v, i) => v === i) ? mergeMaps(sh) : null;
   let html = `<div class="g-head" style="width:${numW + total}px"><div class="g-hrow"><div class="g-corner"></div>${pad}`;
   for (let c = c0; c < c1; c++) {
     const col = sh.cols[c], sorted = sh.sort.c === c && sh.sort.dir;
@@ -607,11 +741,21 @@ function renderGrid() {
     html += `<div class="g-row" style="top:${HH + r * RH}px;width:${numW + total}px;background:var(${r % 2 ? '--grid-alt' : '--grid-bg'})">` +
       `<div class="g-num${rs ? ' sel' : ''}" data-r="${r}">${sh.view[r] + 1}</div>${pad}`;
     for (let c = c0; c < c1; c++) {
-      const col = sh.cols[c], fx = Formula.isFormula(row[c]), shown = displayCell(sh, sh.view[r], c);
+      const col = sh.cols[c], fx = Formula.isFormula(row[c]), st = row.fmt && row.fmt[c] != null ? styleOf(d, row.fmt[c]) : null;
+      if (merged && merged.covered.has(r + ',' + c)) { html += `<div class="g-cell" style="width:${col.width}px;visibility:hidden"></div>`; continue; }
+      const shown = shownCell(sh, sh.view[r], c, st);
       const bad = fx && /^#[A-Z/0!?]+$/.test(shown);
-      const cls = 'g-cell' + (col.type === 'number' ? ' num' : '') + (fx ? ' fx' : '') + (bad ? ' err' : '') +
+      const cls = 'g-cell' + (col.type === 'number' || (st && st.nf && !st.ha && typeof cellValue(sh, sh.view[r], c) === 'number') ? ' num' : '') + (fx ? ' fx' : '') + (bad ? ' err' : '') +
         (rs && c >= C0 && c <= C1 ? ' sel' : '') + (r === s.fr && c === s.fc ? ' focus' : '');
-      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="width:${col.width}px">${esc(shown)}</div>`;
+      let style = `width:${col.width}px` + (st ? ';' + XFormat.css(st, dark) : '');
+      const mg = merged && merged.anchors.get(r + ',' + c);
+      if (mg) {
+        let w = 0; for (let k = c; k < c + mg.cs && k < sh.cols.length; k++) w += sh.cols[k].width;
+        const jc = st && st.ha === 'center' || st && st.ha === 'centerContinuous' ? 'center' : st && st.ha === 'right' ? 'flex-end' : 'flex-start';
+        const ai = st && st.va === 'top' ? 'flex-start' : st && st.va === 'center' ? 'center' : 'flex-end';
+        style += `;width:${w}px;height:${mg.rs * RH}px;position:relative;z-index:1;display:flex;justify-content:${jc};align-items:${ai};background:${st && st.bg && !(dark && st.bg === '#FFFFFF') ? st.bg : `var(${r % 2 ? '--grid-alt' : '--grid-bg'})`}`;
+      }
+      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="${style}">${esc(shown)}</div>`;
     }
     html += '</div>';
   }
@@ -710,7 +854,7 @@ $('#globalSearch').addEventListener('keydown', e => { if (e.key === 'Enter' || e
 function startResize(e, c) {
   e.preventDefault(); e.stopPropagation();
   const sh = sheet(), x0 = e.clientX, w0 = sh.cols[c].width;
-  const move = ev => { sh.cols[c].width = Math.max(40, Math.round(w0 + ev.clientX - x0)); layoutCols(sh); renderGrid(); };
+  const move = ev => { const col = sh.cols[c]; col.width = Math.max(40, Math.round(w0 + ev.clientX - x0)); col.xw = +((col.width - 5) / 7).toFixed(2); layoutCols(sh); renderGrid(); };
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', () => window.removeEventListener('mousemove', move), {once: true});
 }
@@ -856,10 +1000,23 @@ function pasteText(text) {
 }
 
 /* ================= Undo / redo (operations) ================= */
+/* Merged cells follow inserted/deleted rows and columns: computed once per operation, restored exactly on undo. */
 function applyOp(sh, op, undo) {
+  if (sh.merges && sh.merges.length && op.t !== 'cells' && op.t !== 'fmt' && op.t !== 'rename' && op.t !== 'batch') {
+    if (undo) { applyOpBase(sh, op, undo); if (op.mBefore) sh.merges = op.mBefore.map(m => ({...m})); return; }
+    const before = sh.merges.map(m => ({...m})), rowsBefore = sh.rows.slice();
+    applyOpBase(sh, op, undo);
+    if (!op.mAfter) op.mAfter = remapMerges(sh, op, before, rowsBefore);
+    op.mBefore = before; sh.merges = op.mAfter.map(m => ({...m}));
+    return;
+  }
+  applyOpBase(sh, op, undo);
+}
+function applyOpBase(sh, op, undo) {
   switch (op.t) {
     case 'cells': for (const x of op.ch) { if (sh.rows[x.r]) sh.rows[x.r][x.c] = undo ? x.o : x.n; } break;
-    case 'rows+': if (undo) sh.rows.splice(op.at, op.rows.length); else sh.rows.splice(op.at, 0, ...op.rows.map(r => r.slice())); break;
+    case 'fmt': for (const x of op.ch) { const row = sh.rows[x.r]; if (!row) continue; const v = undo ? x.o : x.n; if (v == null) { if (row.fmt) delete row.fmt[x.c]; } else (row.fmt = row.fmt || {})[x.c] = v; } break;
+    case 'rows+': if (undo) sh.rows.splice(op.at, op.rows.length); else sh.rows.splice(op.at, 0, ...op.rows.map(r => Object.assign(r.slice(), r.fmt ? {fmt: {...r.fmt}} : {}))); break;
     case 'rows-':
       if (undo) for (const it of op.items) sh.rows.splice(it.i, 0, it.row);
       else for (let k = op.items.length - 1; k >= 0; k--) sh.rows.splice(op.items[k].i, 1);
@@ -867,7 +1024,9 @@ function applyOp(sh, op, undo) {
     case 'col+': case 'col-': {
       const add = (op.t === 'col+') !== undo;
       if (add) { sh.cols.splice(op.at, 0, {...op.col}); sh.rows.forEach((r, i) => r.splice(op.at, 0, op.vals[i] ?? '')); }
-      else { sh.cols.splice(op.at, 1); sh.rows.forEach(r => r.splice(op.at, 1)); }
+      else { if (!op.fmts) { op.fmts = sh.rows.map(r => r.fmt && r.fmt[op.at]); op.headF = sh.headFmt && sh.headFmt[op.at]; } sh.cols.splice(op.at, 1); sh.rows.forEach(r => r.splice(op.at, 1)); }
+      shiftFmtCols(sh, op.at, add ? 1 : -1);
+      if (add && op.fmts) { sh.rows.forEach((r, i) => { if (op.fmts[i] != null) (r.fmt = r.fmt || {})[op.at] = op.fmts[i]; }); if (op.headF != null) (sh.headFmt = sh.headFmt || {})[op.at] = op.headF; }
       shiftColState(sh, op.at, add ? 1 : -1);
       break;
     }
@@ -884,7 +1043,7 @@ function shiftColState(sh, at, delta) {
   else if (sh.sort.c >= at) sh.sort.c += delta;
   sh.chart = null;
 }
-const structural = op => op.t !== 'cells' && op.t !== 'rename' || (op.t === 'batch');
+const structural = op => op.t !== 'cells' && op.t !== 'rename' && op.t !== 'fmt' || (op.t === 'batch');
 function doOp(op, forceRecalc = false) {
   const d = cur(), sh = sheet();
   op.s = d.si;
@@ -901,7 +1060,7 @@ function afterOp(sh, op, forceRecalc) {
   const cols = new Set();
   const collect = o => o.t === 'cells' ? o.ch.forEach(x => cols.add(x.c)) : o.t === 'batch' ? o.ops.forEach(collect) : null;
   collect(op);
-  if (op.t === 'cells') cols.forEach(c => detectType(sh, c)); else detectAll(sh);
+  if (op.t === 'cells') cols.forEach(c => detectType(sh, c)); else if (op.t !== 'fmt') detectAll(sh);
   if (op.t === 'col+' || op.t === 'col-' || op.t === 'header') measureCols(sh);
   refresh(forceRecalc || structural(op));
   renderTabs();
@@ -982,9 +1141,13 @@ function setHeader(sh, on) {
   if (on === sh.header) return;
   if (on) {
     const first = sh.rows.shift() || [];
+    sh.headFmt = first.fmt || {};
     sh.cols.forEach((c, i) => { c.name = rawText(first[i]).trim() || colName(i); });
   } else {
-    sh.rows.unshift(sh.cols.map(c => c.name));
+    const names = sh.cols.map(c => c.name);
+    if (sh.headFmt && Object.keys(sh.headFmt).length) names.fmt = sh.headFmt;
+    sh.headFmt = {};
+    sh.rows.unshift(names);
     sh.cols.forEach((c, i) => { c.name = colName(i); });
   }
   sh.header = on;
@@ -1213,6 +1376,7 @@ function serialize(d, fmt, onlyVisible, keepRaw) {
       `|${cols.map(c => c.type === 'number' ? '---:' : ':---').join('|')}|`,
       ...idx.map(i => `| ${cols.map((_, c) => cellMd(displayCell(sh, i, c))).join(' | ')} |`)].join('\n') + '\n';
   }
+  if ((fmt === 'xlsx' || fmt === 'xlsm') && invoke) return writeXlsx(d, onlyVisible, value);
   if (fmt === 'xlsx' || SHEET_EXT.includes(fmt)) {
     const wb = XLSX.utils.book_new();
     d.sheets.forEach(s => {
@@ -1233,6 +1397,41 @@ function serialize(d, fmt, onlyVisible, keepRaw) {
   }
   throw new Error('Unknown format ' + fmt);
 }
+/* Excel files are written in Rust (xlsx.rs): starting from the original file when there is one, so dropdown lists,
+   conditional formats, frozen panes, print settings and images stay; cells, styles, merges and sizes come from here. */
+async function writeXlsx(d, onlyVisible, value) {
+  const active = sheet();
+  const sheets = d.sheets.map(s => {
+    const full = !(s === active && onlyVisible), rs = full ? rowIndexes(s, false) : rowIndexes(s, true), head = s.header ? 1 : 0;
+    const cells = [], ref = v => v == null ? null : v;
+    if (head) s.cols.forEach((col, c) => {
+      const st = ref(s.headFmt && s.headFmt[c]), placeholder = col.autoName && col.name === colName(c);
+      if (!placeholder || st != null) cells.push([0, c, 's', placeholder ? '' : col.name, st]);
+    });
+    rs.forEach((i, k) => {
+      const row = s.rows[i], r = k + head;
+      row.forEach((raw, c) => {
+        let st = ref(row.fmt && row.fmt[c]);
+        if (Formula.isFormula(raw) && full) return cells.push([r, c, 'f', Formula.toExcel(toExcelFormula(s, raw).slice(1)), st]);
+        const v = typed(value(s, i, c), s.cols[c]);
+        if (isEmpty(v)) { if (st != null) cells.push([r, c, 's', '', st]); return; }
+        if (v instanceof Date) {
+          // Dates need a date format in Excel, otherwise they show as numbers.
+          const cur = styleOf(d, st);
+          if (!cur || !cur.nf) st = withSet(st, {nf: v.getHours() || v.getMinutes() ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd'});
+          return cells.push([r, c, 'd', XFormat.toSerial(v), st]);
+        }
+        cells.push([r, c, typeof v === 'number' ? 'n' : typeof v === 'boolean' ? 'b' : 's', typeof v === 'number' || typeof v === 'boolean' ? v : String(v), st]);
+      });
+    });
+    const merges = full ? (s.merges || []).map(m => [m.r + head, m.c, m.rs, m.cs]).filter(m => m[0] >= 0) : [];
+    const widths = s.cols.map((col, c) => [c, col.xw != null ? col.xw : +Math.max(4, (col.width - 5) / 7).toFixed(2), !!col.xhidden]);
+    const heights = full ? [...(head && s.headHt ? [[0, s.headHt]] : []), ...rs.map((i, k) => s.rows[i].ht ? [k + head, s.rows[i].ht] : null).filter(Boolean)] : [];
+    return {name: s.name, cells, merges, widths, heights};
+  });
+  const original = d.path && ['xlsx', 'xlsm'].includes(extOf(d.path)) ? d.path : null;
+  return new Uint8Array(await invoke('xlsx_write', {req: {original, token: d.xtoken || null, sheets}}));
+}
 const toBytes = out => typeof out === 'string' ? new TextEncoder().encode(out) : out;
 /* Saves in the file's own format (CSV keeps its separator and text exactly). */
 async function save() {
@@ -1241,7 +1440,7 @@ async function save() {
   if (d.isNew || !d.path && invoke) return exportDialog(true);
   const fmt = ['csv', 'txt'].includes(d.format) ? 'csv' : d.format;
   try {
-    const bytes = toBytes(serialize(d, fmt, false, true));
+    const bytes = toBytes(await serialize(d, fmt, false, true));
     const r = await writeBytes(bytes, {path: d.path, name: d.name, filter: FORMAT_NAMES[d.format] || 'Data', ext: extOf(d.name)});
     if (!r) return;
     markSaved(d, r, bytes.length);
@@ -1267,7 +1466,7 @@ function exportDialog(saveAs) {
       closeModal();
       const {ext, filter} = FORMATS[fmt], name = d.name.replace(/\.[^.]+$/, '') + '.' + ext;
       try {
-        const bytes = toBytes(serialize(d, fmt, only, false));
+        const bytes = toBytes(await serialize(d, fmt, only, false));
         const r = await writeBytes(bytes, {name, filter, ext});
         if (!r) return;
         if (saveAs) {
@@ -1310,6 +1509,7 @@ function updateUI() {
   fxIn.disabled = row < 0;
   if (document.activeElement !== fxIn) fxIn.value = row >= 0 && col ? rawText(sh.rows[row][s.fc]) : '';
   $('#stFormat').textContent = FORMAT_NAMES[d.format] || d.format;
+  syncFormatBar();
   $('#stSize').textContent = d.size ? fmtSize(d.size) : '';
 }
 
@@ -1333,6 +1533,13 @@ const ICONS = {
   panel: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>',
   rows: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  alignL: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h10M4 14h16M4 18h10"/></svg>',
+  alignC: '<svg viewBox="0 0 24 24"><path d="M4 6h16M7 10h10M4 14h16M7 18h10"/></svg>',
+  alignR: '<svg viewBox="0 0 24 24"><path d="M4 6h16M10 10h10M4 14h16M10 18h10"/></svg>',
+  wrap: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h13a3 3 0 0 1 0 6h-4M15 16l-2 2 2 2M4 18h5"/></svg>',
+  borders: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M12 4v16M4 12h16"/></svg>',
+  fill: '<svg viewBox="0 0 24 24"><path d="m5 11 7-7 7 7-7 7z"/><path d="M19 15s2 2.2 2 3.5a2 2 0 0 1-4 0c0-1.3 2-3.5 2-3.5z"/></svg>',
+  eraser: '<svg viewBox="0 0 24 24"><path d="m7 21-4-4 10-10 7 7-7 7z"/><path d="M14 21h7M9 11l7 7"/></svg>',
   help: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"/></svg>'
 };
 const setView = v => { settings.view = v; applySettings(); };
@@ -1345,6 +1552,11 @@ const A = {
   insertRow, deleteRows, insertCol, deleteCol: deleteCols, renameCol: () => renameColumn(),
   sortAsc: () => sortBy(1), sortDesc: () => sortBy(-1), clearView,
   toggleFilters: () => { settings.filters = !settings.filters; applySettings(); },
+  fmtBold: toggleFlag('b'), fmtItalic: toggleFlag('i'), fmtUnderline: toggleFlag('u'), fmtStrike: toggleFlag('s'), fmtWrap: toggleFlag('wrap'),
+  fmtAlignLeft: () => applyFormat({ha: (focusStyle() || {}).ha === 'left' ? null : 'left'}), fmtAlignCenter: () => applyFormat({ha: (focusStyle() || {}).ha === 'center' ? null : 'center'}),
+  fmtAlignRight: () => applyFormat({ha: (focusStyle() || {}).ha === 'right' ? null : 'right'}),
+  fmtBorders: () => applyFormat({bd: (focusStyle() || {}).bd ? 'none' : 'all'}), fmtFontColor: () => $('#fcPick').click(), fmtFill: () => $('#bgPick').click(),
+  fmtNoFill: () => applyFormat({bg: null}), fmtClear: () => applyFormat({clear: 1}),
   toggleHeader: () => {
     // The first row becomes the column names (or the names become row 1): formulas move with their rows, like deleting/inserting a row.
     const sh = sheet(), on = !sh.header;
@@ -1377,6 +1589,8 @@ const MENUS = [
   ['file', [['openFile', 'Ctrl+O'], ['newTable', 'Alt+N'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], ['exportAs', 'Ctrl+E'], '-', ['closeTab', 'Alt+W']]],
   ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['copy', 'Ctrl+C', null, true], ['selectAll', 'Ctrl+A', null, true], '-',
     ['editCell', 'F2', null, true], ['clearCells', 'Delete', null, true], '-', ['find', 'Ctrl+F']]],
+  ['format', [['fmtBold', 'Ctrl+B'], ['fmtItalic', 'Ctrl+I'], ['fmtUnderline', 'Ctrl+U'], ['fmtStrike', 'Ctrl+5'], '-',
+    ['fmtFontColor'], ['fmtFill'], ['fmtNoFill'], ['fmtBorders'], '-', ['fmtAlignLeft'], ['fmtAlignCenter'], ['fmtAlignRight'], ['fmtWrap'], '-', ['fmtClear']]],
   ['data', [['insertRow', 'Ctrl+Enter'], ['deleteRows', 'Ctrl+-'], ['insertCol', 'Ctrl+Shift+Enter'], ['deleteCol', 'Ctrl+Shift+-'], ['renameCol'], '-',
     ['sortAsc', 'Alt+ArrowUp'], ['sortDesc', 'Alt+ArrowDown'], ['toggleFilters', 'Ctrl+Shift+F', () => settings.filters], ['clearView', 'Ctrl+Shift+L'], '-',
     ['toggleHeader', null, () => sheet() && sheet().header]]],
@@ -1394,7 +1608,7 @@ const KEYMAP = {};
 MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
 const NO_DOC = new Set(['openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
   'themeGithubDark', 'shortcuts', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
-const allowed = act => !!cur() || NO_DOC.has(act);
+const allowed = act => act.startsWith('fmt') ? canFormat() : !!cur() || NO_DOC.has(act);
 function run(act) { if (allowed(act)) A[act](); }
 function syncDisabled() { $$('[data-act]').forEach(b => b.disabled = !allowed(b.dataset.act)); $('#globalSearch').disabled = !cur(); }
 
@@ -1437,6 +1651,15 @@ function makeBtn(act, html) {
 function buildToolbars() {
   const fill = (id, list) => { const box = $(id); box.innerHTML = ''; list.forEach(([a, i]) => box.append(makeBtn(a, i))); };
   fill('#fileBtns', [['openFile', ICONS.open], ['newTable', ICONS.newt], ['save', ICONS.save], ['undo', ICONS.undo], ['redo', ICONS.redo], ['exportAs', ICONS.export]]);
+  const fb = $('#fmtBtns'); fb.innerHTML = '';
+  const letter = (a, html) => { const b = makeBtn(a, html); b.classList.add('txt'); return b; };
+  fb.append(letter('fmtBold', '<b>B</b>'), letter('fmtItalic', '<i style="font-family:Georgia,serif">I</i>'), letter('fmtUnderline', '<u>U</u>'),
+    letter('fmtFontColor', '<span class="cbtn">A<i id="fcBar"></i></span>'), letter('fmtFill', `<span class="cbtn">${ICONS.fill}<i id="bgBar"></i></span>`),
+    makeBtn('fmtAlignLeft', ICONS.alignL), makeBtn('fmtAlignCenter', ICONS.alignC), makeBtn('fmtAlignRight', ICONS.alignR), makeBtn('fmtWrap', ICONS.wrap), makeBtn('fmtBorders', ICONS.borders));
+  const nf = document.createElement('select'); nf.id = 'nfSel'; nf.title = t('ui.numFormat');
+  nf.innerHTML = NUM_FORMATS.map(c => `<option value="${esc(c)}">${esc(nfLabel(c))}</option>`).join('');
+  nf.onchange = () => { if (nf.value) applyFormat({nf: nf.value === 'General' ? null : nf.value}); grid.focus(); };
+  fb.append(nf, makeBtn('fmtClear', ICONS.eraser));
   fill('#viewBtns', [['toggleCompact', ICONS.rows], ['togglePanels', ICONS.panel], ['settings', ICONS.gear], ['shortcuts', ICONS.help]]);
   const tools = $('#tools'); tools.innerHTML = '';
   [['insertRow', ICONS.rowAdd], ['deleteRows', ICONS.rowDel], ['insertCol', ICONS.colAdd], ['deleteCol', ICONS.colDel], '-',
@@ -1459,7 +1682,9 @@ function comboOf(e) {
   return (e.ctrlKey || e.metaKey ? 'Ctrl+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.altKey ? 'Alt+' : '') + k;
 }
 const typing = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); };
-const EDIT_ACTS = new Set(['undo', 'redo', 'insertRow', 'deleteRows', 'insertCol', 'deleteCol']);
+const EDIT_ACTS = new Set(['undo', 'redo', 'insertRow', 'deleteRows', 'insertCol', 'deleteCol', 'fmtBold', 'fmtItalic', 'fmtUnderline', 'fmtStrike']);
+$('#fcPick').addEventListener('change', e => applyFormat({fc: e.target.value.toUpperCase()}));
+$('#bgPick').addEventListener('change', e => applyFormat({bg: e.target.value.toUpperCase()}));
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if ($('#modal').classList.contains('show')) { e.preventDefault(); closeModal(); }

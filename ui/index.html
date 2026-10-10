@@ -110,6 +110,11 @@ button{font:inherit;color:inherit}
 .ibtn:disabled,.btn-sm:disabled,.cta:disabled,select:disabled,input:disabled{opacity:.35;pointer-events:none}
 select{background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius);height:26px;padding:0 6px;font:inherit;outline:0}
 select:focus,input:focus{border-color:var(--accent)}
+.ibtn.txt{font-size:14px;min-width:26px;padding:0 4px}
+.cbtn{display:inline-flex;flex-direction:column;align-items:center;line-height:1;font-weight:700}
+.cbtn svg{width:14px;height:14px}
+.cbtn i{display:block;width:16px;height:3px;margin-top:2px;border-radius:1px;border:1px solid var(--input-border)}
+#nfSel{max-width:150px}
 .search{position:relative;display:flex;align-items:center}
 .search svg{position:absolute;left:8px;width:14px;height:14px;stroke:var(--dim);fill:none;stroke-width:2}
 .search input{padding-left:28px;width:260px}
@@ -308,6 +313,8 @@ body.compact .grid{--rh:22px}
 
 <div class="optbar">
   <div class="group" id="fileBtns"></div>
+  <div class="group" id="fmtBtns"></div>
+  <input type="color" id="fcPick" hidden><input type="color" id="bgPick" value="#ffff00" hidden>
   <div class="group">
     <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
       <input class="field-in" id="globalSearch" data-i18n-ph="ui.searchRows" spellcheck="false"></label>
@@ -378,6 +385,7 @@ body.compact .grid{--rh:22px}
 <input type="file" id="fileIn" multiple hidden>
 
 <script src="formula.js"></script>
+<script src="xformat.js"></script>
 <script src="native.js"></script>
 <script src="app.js"></script>
 </body>

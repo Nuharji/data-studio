@@ -1,6 +1,8 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod xlsx;
+
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -223,6 +225,7 @@ fn main() {
             let _ = app.emit("context-menu", event.id().as_ref());
         })
         .manage(Mutex::new(Pending { ready: false, paths: args }))
+        .manage(xlsx::Styles::default())
         .invoke_handler(tauri::generate_handler![
             context_menu,
             clipboard_read,
@@ -232,7 +235,10 @@ fn main() {
             save_binary,
             confirm,
             open_url,
-            initial_files
+            initial_files,
+            xlsx::xlsx_read,
+            xlsx::xlsx_write,
+            xlsx::xlsx_forget
         ])
         .build(tauri::generate_context!())
         .expect("error while building Data Studio");
