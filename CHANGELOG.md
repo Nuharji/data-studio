@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0 — 2026-10-10
+- Column types, search, column filters and sorting are now computed by the app's Rust core — much faster with big tables (100,000 rows: sorting ~0.25 s, filtering ~0.1 s).
+- Same rules as before: numbers in English or German style, dates, yes/no columns; filters like >5, 10..20, =exact, !not; natural sort order (Datei2 before Datei10), empty cells last.
+
 ## 1.5.0 — 2026-10-10
 - Formulas are now calculated by the app's Rust core: same functions (English and German names), German decimal commas, Excel errors and circular-reference detection as before — the table keeps a copy in Rust that every edit updates.
 - The JavaScript formula calculator is removed; only the tools that adjust references when rows or columns move remain there.

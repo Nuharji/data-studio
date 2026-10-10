@@ -245,29 +245,43 @@ let engineSeq = 0;
 const FK = (r, c) => r * 16384 + c;
 const toEngine = v => v instanceof Date ? {$d: XFormat.toSerial(v)} : v == null ? '' : v;
 const fromEngine = v => v && typeof v === 'object' ? ('$e' in v ? Formula.error(v.$e) : '$d' in v ? XFormat.fromSerial(v.$d) : v) : v;
-const hasFormulas = sh => sh.rows.some(r => r.some(Formula.isFormula));
 function engineLoad(sh) {
   if (!invoke) return;
   sh.eid = sh.eid || ++engineSeq;
   sh.engineReady = invoke('engine_load', {id: sh.eid, rows: sh.rows.map(r => r.map(toEngine))});
 }
-/* Fetches the results; only the newest request for a sheet is applied. Returns true when results changed. */
-async function engineCalc(sh) {
-  if (!invoke || !sh.eid) return false;
+/* Everything that depends on the data comes from Rust in one answer (engine.rs, view.rs): formula results, column
+   types, and the visible rows (search, column filters, sorting). Only the newest answer for a sheet is applied;
+   then the table is drawn again. */
+async function engineUpdate(sh) {
+  if (!invoke || !sh.eid) return;
   const my = sh.calcSeq = (sh.calcSeq || 0) + 1;
-  if (!hasFormulas(sh)) { const had = sh.fv && sh.fv.size; sh.fv = new Map(); return !!had; }
   await sh.engineReady;
   const now = new Date(), today = Math.floor(now.getTime() / 86400000 - now.getTimezoneOffset() / 1440) + 25569;
-  const res = await invoke('engine_calc', {id: sh.eid, german: sh.cols.map(c => c.numStyle === 'de'), today});
-  if (my !== sh.calcSeq) return false;
-  sh.fv = new Map(res.map(([r, c, v]) => [FK(r, c), fromEngine(v)]));
-  return true;
+  const filters = Object.entries(sh.filters).filter(([, v]) => v && v.trim()).map(([c, v]) => [+c, v]);
+  const res = await invoke('engine_update', {id: sh.eid, cols: sh.cols.length, today,
+    view: {query: sh.query, filters, sort: sh.sort.dir ? [sh.sort.c, sh.sort.dir] : null}});
+  if (my !== sh.calcSeq) return;
+  sh.fv = new Map(res.values.map(([r, c, v]) => [FK(r, c), fromEngine(v)]));
+  res.types.forEach((ty, c) => { const col = sh.cols[c]; if (col) { col.type = ty.type; col.numStyle = ty.german ? 'de' : 'en'; } });
+  sh.view = res.view; clampSel(sh);
+  if (sh === sheet()) { layoutCols(sh); renderGrid(); renderSheets(); buildPanels(); renderChart(); updateUI(); }
 }
-/* After new results: column types and the filtered/sorted view can depend on them. */
-async function recalc(sh) {
-  if (!await engineCalc(sh)) return;
-  sh.cols.forEach((_, c) => { if (sh.rows.some(r => Formula.isFormula(r[c]))) detectType(sh, c); });
-  if (sh === sheet()) refresh(!!(sh.sort.dir || sh.query.trim() || Object.values(sh.filters).some(v => v && v.trim())));
+/* Until Rust answers, the view stays usable: all rows in stored order when nothing filters or sorts; otherwise the
+   previous order (rows that no longer exist are dropped, new ones added at the end). */
+function provisionalView(sh) {
+  const n = sh.rows.length, active = sh.sort.dir || sh.query.trim() || Object.values(sh.filters).some(v => v && v.trim());
+  if (!active || !sh.view) sh.view = Array.from({length: n}, (_, i) => i);
+  else {
+    const seen = new Set();
+    sh.view = sh.view.filter(i => i < n && !seen.has(i) && seen.add(i));
+    for (let i = 0; i < n; i++) if (!seen.has(i)) sh.view.push(i);
+  }
+  clampSel(sh);
+}
+function clampSel(sh) {
+  const s = sh.sel, maxR = Math.max(0, sh.view.length - 1), maxC = Math.max(0, sh.cols.length - 1);
+  s.ar = clamp(s.ar, 0, maxR); s.fr = clamp(s.fr, 0, maxR); s.ac = clamp(s.ac, 0, maxC); s.fc = clamp(s.fc, 0, maxC);
 }
 /* What a cell holds after calculation: formulas give their result, everything else is returned as stored. */
 const cellValue = (sh, r, c) => { const raw = sh.rows[r][c]; return Formula.isFormula(raw) ? (sh.fv && sh.fv.has(FK(r, c)) ? sh.fv.get(FK(r, c)) : '') : raw; };
@@ -284,40 +298,6 @@ function displayCell(sh, r, c) {
   }
   return display(v, col);
 }
-/* Column type: sampled, so huge files stay fast. Formula cells count with their result. */
-function detectType(sh, c) {
-  const col = sh.cols[c], n = sh.rows.length, step = Math.max(1, Math.floor(n / 3000));
-  const vals = [];
-  for (let i = 0; i < n && vals.length < 3000; i += step) {
-    const v = cellValue(sh, i, c);
-    if (!isEmpty(v) && !Formula.isError(v)) vals.push(v);
-  }
-  col.numStyle = 'en';
-  if (!vals.length) { col.type = 'text'; return; }
-  if (vals.every(v => typeof v === 'number')) { col.type = 'number'; return; }
-  if (vals.every(v => v instanceof Date)) { col.type = 'date'; return; }
-  if (vals.every(v => typeof v === 'boolean' || (typeof v === 'string' && BOOL.test(v.trim())))) { col.type = 'bool'; return; }
-  const strs = vals.every(v => typeof v === 'string' || typeof v === 'number');
-  if (strs && vals.every(v => Number.isFinite(toNumber(v, 'en')))) { col.type = 'number'; return; }
-  if (strs && vals.every(v => Number.isFinite(toNumber(v, 'de')))) { col.type = 'number'; col.numStyle = 'de'; return; }
-  if (vals.every(v => Number.isFinite(toTime(v)))) { col.type = 'date'; return; }
-  col.type = 'text';
-}
-const detectAll = sh => sh.cols.forEach((_, c) => detectType(sh, c));
-function sortKey(v, col) {
-  if (isEmpty(v)) return null;
-  if (col.type === 'number') { const n = toNumber(v, col.numStyle); return Number.isFinite(n) ? n : rawText(v).toLowerCase(); }
-  if (col.type === 'date') { const n = toTime(v); return Number.isFinite(n) ? n : rawText(v).toLowerCase(); }
-  return rawText(v);
-}
-const collator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
-function cmpKeys(a, b) {
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  if (typeof a === 'number') return -1;
-  if (typeof b === 'number') return 1;
-  return collator.compare(a, b);
-}
-
 /* ================= Excel formatting (see xformat.js for display, src-tauri/src/xlsx.rs for files) ================= */
 const isDarkTheme = () => settings.theme === 'dark' || settings.theme === 'github-dark';
 const FLAGS = ['b', 'i', 'u', 's', 'wrap'];
@@ -437,8 +417,8 @@ function makeSheet(name, aoa, header = true, excelRefs = false) {
   });
   const sh = {name, header, cols, rows, view: [], sort: {c: -1, dir: 0}, filters: {}, query: '',
     sel: {ar: 0, ac: 0, fr: 0, fc: 0}, scroll: {top: 0, left: 0}, chart: null};
-  detectAll(sh); measureCols(sh); recompute(sh);
-  engineLoad(sh); recalc(sh);
+  measureCols(sh); provisionalView(sh);
+  engineLoad(sh); engineUpdate(sh);
   return sh;
 }
 /* Excel workbooks are read in Rust (xlsx.rs) with their formatting: values, formulas, a style table, merged cells,
@@ -595,52 +575,6 @@ $('#sheets').addEventListener('click', e => {
 });
 
 /* ================= Filtering & sorting ================= */
-function makeFilter(sh, c, expr) {
-  let s = expr.trim(), neg = false;
-  if (s.startsWith('!')) { neg = true; s = s.slice(1).trim(); }
-  const col = sh.cols[c], numeric = col.type === 'number' || col.type === 'date';
-  const val = v => col.type === 'date' ? toTime(v) : toNumber(v, col.numStyle);
-  const parse = x => col.type === 'date' ? toTime(x.trim()) : (Number.isFinite(toNumber(x.trim(), col.numStyle)) ? toNumber(x.trim(), col.numStyle) : toNumber(x.trim(), 'en'));
-  let test;
-  let m;
-  if (numeric && (m = /^(>=|<=|>|<|=)\s*(.+)$/.exec(s)) && Number.isFinite(parse(m[2]))) {
-    const x = parse(m[2]), op = m[1];
-    test = v => { const n = val(v); return Number.isFinite(n) && (op === '>' ? n > x : op === '<' ? n < x : op === '>=' ? n >= x : op === '<=' ? n <= x : n === x); };
-  } else if (numeric && (m = /^(.+?)\s*\.\.\s*(.+)$/.exec(s)) && Number.isFinite(parse(m[1])) && Number.isFinite(parse(m[2]))) {
-    const a = parse(m[1]), b = parse(m[2]);
-    test = v => { const n = val(v); return Number.isFinite(n) && n >= a && n <= b; };
-  } else if (s.startsWith('=')) {
-    const x = s.slice(1).trim().toLowerCase();
-    test = v => rawText(v).toLowerCase() === x;
-  } else {
-    const x = s.toLowerCase();
-    test = v => rawText(v).toLowerCase().includes(x);
-  }
-  return i => test(cellValue(sh, i, c)) !== neg;
-}
-function recompute(sh) {
-  const q = sh.query.trim().toLowerCase();
-  const fs = Object.entries(sh.filters).filter(([c, v]) => v && v.trim() && sh.cols[+c]).map(([c, v]) => makeFilter(sh, +c, v));
-  const idx = [];
-  for (let i = 0; i < sh.rows.length; i++) {
-    if (q && !sh.rows[i].some((_, c) => { const v = cellValue(sh, i, c); return !isEmpty(v) && rawText(v).toLowerCase().includes(q); })) continue;
-    if (fs.length && !fs.every(f => f(i))) continue;
-    idx.push(i);
-  }
-  if (sh.sort.dir && sh.cols[sh.sort.c]) {
-    const c = sh.sort.c, col = sh.cols[c], dir = sh.sort.dir, keys = new Map();
-    for (const i of idx) keys.set(i, sortKey(cellValue(sh, i, c), col));
-    idx.sort((a, b) => {
-      const ka = keys.get(a), kb = keys.get(b);
-      if (ka === null) return kb === null ? a - b : 1;
-      if (kb === null) return -1;
-      return cmpKeys(ka, kb) * dir || a - b;
-    });
-  }
-  sh.view = idx;
-  const s = sh.sel, maxR = Math.max(0, idx.length - 1), maxC = sh.cols.length - 1;
-  s.ar = clamp(s.ar, 0, maxR); s.fr = clamp(s.fr, 0, maxR); s.ac = clamp(s.ac, 0, maxC); s.fc = clamp(s.fc, 0, maxC);
-}
 
 /* ================= Grid rendering (virtualized rows and columns) ================= */
 let measureCtx = null;
@@ -738,7 +672,7 @@ window.addEventListener('resize', () => { renderGrid(); if (chart) chart.resize(
 /* Full refresh of the current sheet (after data, layout or setting changes). */
 function refresh(recalc = false) {
   const sh = sheet(); if (!sh) return;
-  if (recalc) recompute(sh);
+  if (recalc) { provisionalView(sh); engineUpdate(sh); }
   layoutCols(sh); renderGrid(); renderSheets(); buildPanels(); renderChart(); updateUI();
 }
 
@@ -1030,14 +964,12 @@ function afterOp(sh, op, forceRecalc) {
     add(op);
     if (ch.length && invoke && sh.eid) sh.engineReady = Promise.resolve(sh.engineReady).then(() => invoke('engine_set', {id: sh.eid, changes: ch}));
   } else { sh.fv = new Map(); engineLoad(sh); }
-  if (op.t !== 'fmt' && op.t !== 'rename') recalc(sh);
   d.dirty = d.history.length !== d.cleanDepth;
-  const cols = new Set();
-  const collect = o => o.t === 'cells' ? o.ch.forEach(x => cols.add(x.c)) : o.t === 'batch' ? o.ops.forEach(collect) : null;
-  collect(op);
-  if (op.t === 'cells') cols.forEach(c => detectType(sh, c)); else if (op.t !== 'fmt') detectAll(sh);
   if (op.t === 'col+' || op.t === 'col-' || op.t === 'header') measureCols(sh);
-  refresh(forceRecalc || structural(op));
+  // Structural changes re-filter and re-sort; cell edits only need new results and types.
+  const full = forceRecalc || structural(op);
+  refresh(full);
+  if (!full && op.t !== 'fmt' && op.t !== 'rename') engineUpdate(sh);
   renderTabs();
 }
 function undoRedo(redo) {
@@ -1852,4 +1784,4 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__dt = {openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, recompute, refresh, pasteText, settings: () => settings};
+window.__dt = {openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, settings: () => settings};

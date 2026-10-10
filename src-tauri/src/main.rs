@@ -4,6 +4,7 @@
 mod engine;
 mod formula;
 mod table;
+mod view;
 mod xlsx;
 
 use serde::{Deserialize, Serialize};
@@ -247,6 +248,7 @@ fn main() {
             engine::engine_load,
             engine::engine_set,
             engine::engine_calc,
+            engine::engine_update,
             engine::engine_drop,
             table::table_read,
             table::table_write,

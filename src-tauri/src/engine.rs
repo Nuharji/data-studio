@@ -6,6 +6,7 @@
 //! Results: the same, plus {"$e": "#DIV/0!"} for errors.
 
 use crate::formula::{Calc, V};
+use crate::view::{compute_view, detect, sample, ColType, ViewReq};
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Mutex};
 use tauri::State;
@@ -127,6 +128,45 @@ pub fn calc_table(t: &[Vec<V>], german: &[bool], today: f64) -> Vec<(usize, usiz
         }
     }
     out
+}
+
+/// Formula results as values (for the view) — same as calc_table but without JSON.
+fn calc_values(t: &[Vec<V>], german: &[bool], today: f64) -> HashMap<(usize, usize), V> {
+    let conv = |v: &V, c: usize| plain(v, german.get(c).copied().unwrap_or(false));
+    let mut calc = Calc::new(t, &conv, today);
+    let mut out = HashMap::new();
+    for (r, row) in t.iter().enumerate() {
+        for (c, v) in row.iter().enumerate() {
+            if is_formula(v) { out.insert((r, c), calc.cell(r, c)); }
+        }
+    }
+    out
+}
+
+fn is_formula(v: &V) -> bool { matches!(v, V::Str(s) if s.len() > 1 && s.starts_with('=')) }
+
+/// Everything the UI shows after a change: column types, formula results and the visible rows (search, filters,
+/// sorting). Order matters: types of plain columns decide how numbers are read ("1.234,5"), formulas are calculated
+/// with that, then columns with formulas get their type from the results.
+#[tauri::command]
+pub async fn engine_update(engine: State<'_, Engine>, id: u64, cols: usize, view: ViewReq, today: f64) -> Result<Value, String> {
+    let map = engine.0.lock().unwrap();
+    let t = map.get(&id).ok_or("table not loaded")?;
+    let rows = t.len();
+    let empty = V::Empty;
+    let raw = |r: usize, c: usize| t[r].get(c).unwrap_or(&empty);
+    let mut types: Vec<ColType> = (0..cols)
+        .map(|c| detect(&sample(|i| { let v = raw(i, c); if is_formula(v) { &empty } else { v } }, rows)))
+        .collect();
+    let german: Vec<bool> = types.iter().map(|ty| ty.german).collect();
+    let fv = calc_values(t, &german, today);
+    let value = |r: usize, c: usize| -> &V { let v = raw(r, c); if is_formula(v) { fv.get(&(r, c)).unwrap_or(&empty) } else { v } };
+    for c in 0..cols {
+        if (0..rows).any(|r| is_formula(raw(r, c))) { types[c] = detect(&sample(|i| value(i, c), rows)); }
+    }
+    let visible = compute_view(rows, cols, &value, &types, &view);
+    let values: Vec<(usize, usize, Value)> = fv.iter().map(|((r, c), v)| (*r, *c, to_json(v))).collect();
+    Ok(json!({"types": types, "values": values, "view": visible}))
 }
 
 #[tauri::command]
