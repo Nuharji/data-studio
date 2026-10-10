@@ -1217,12 +1217,14 @@ function serialize(d, fmt, onlyVisible, keepRaw) {
     const wb = XLSX.utils.book_new();
     d.sheets.forEach(s => {
       const rs = s === sh ? idx : rowIndexes(s, false);
-      const aoa = [s.cols.map(c => c.name), ...rs.map(i => s.cols.map((col, c) => typed(value(s, i, c), col)))];
+      // Without a header row the column names are only placeholders (A, B, …), so the data starts in row 1.
+      const head = s.header ? 1 : 0;
+      const aoa = [...(head ? [s.cols.map(c => c.name)] : []), ...rs.map(i => s.cols.map((col, c) => typed(value(s, i, c), col)))];
       const ws = XLSX.utils.aoa_to_sheet(aoa, {cellDates: true});
       // Formulas stay formulas in Excel (only when all rows are written, so references stay valid).
       if (s !== sh || !onlyVisible) rs.forEach((i, k) => s.rows[i].forEach((raw, c) => {
         if (!Formula.isFormula(raw)) return;
-        const addr = XLSX.utils.encode_cell({r: k + 1, c}), v = aoa[k + 1][c];
+        const addr = XLSX.utils.encode_cell({r: k + head, c}), v = aoa[k + head][c];
         ws[addr] = {...(ws[addr] || {}), f: Formula.toExcel(toExcelFormula(s, raw).slice(1)), t: typeof v === 'number' ? 'n' : typeof v === 'boolean' ? 'b' : 's', v: v ?? ''};
       }));
       XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31) || 'Sheet');
@@ -1343,7 +1345,11 @@ const A = {
   insertRow, deleteRows, insertCol, deleteCol: deleteCols, renameCol: () => renameColumn(),
   sortAsc: () => sortBy(1), sortDesc: () => sortBy(-1), clearView,
   toggleFilters: () => { settings.filters = !settings.filters; applySettings(); },
-  toggleHeader: () => { const sh = sheet(); doOp({t: 'header', on: !sh.header}); },
+  toggleHeader: () => {
+    // The first row becomes the column names (or the names become row 1): formulas move with their rows, like deleting/inserting a row.
+    const sh = sheet(), on = !sh.header;
+    doOp(withFormulaFixups(sh, {t: 'header', on}, on ? (r, c) => r === 0 ? null : [r - 1, c] : (r, c) => [r + 1, c]));
+  },
   viewTable: () => setView('table'), viewSplit: () => setView('split'), viewChart: () => setView('chart'),
   togglePanels: () => { settings.dock = !settings.dock; applySettings(); },
   toggleCompact: () => { settings.compact = !settings.compact; applySettings(); },
