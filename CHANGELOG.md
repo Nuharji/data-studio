@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.1 — 2026-10-10
+- New app icon with a dark-to-bright green fade, matching the Studio family look (also in the title bar and start screen).
+
 ## 1.2.0 — 2026-10-10
 - Formulas like in Excel: `=SUM(A1:B5)`, `=A1*B1`, `=IF(...)` and about 30 functions, with English or German names (`=SUMME(A1;B1)`).
 - Formula bar above the table shows the address and formula of the selected cell.
