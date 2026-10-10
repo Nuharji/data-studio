@@ -1,6 +1,6 @@
 [package]
 name = "data-studio"
-version = "1.2.3"
+version = "1.2.4"
 description = "Viewer and editor for CSV, JSON and Excel data"
 edition = "2021"
 rust-version = "1.77"
@@ -9,7 +9,7 @@ rust-version = "1.77"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["image-png"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"

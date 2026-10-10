@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "data-studio"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "serde",
  "tauri",
@@ -3588,6 +3588,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "image",
  "jni",
  "libc",
  "log",

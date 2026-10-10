@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.4 — 2026-10-10
+- The app icon follows the theme: a light fade in dark themes, a dark fade in light themes — in the menu bar, on the start screen and in the window/taskbar icon.
+- All Studio icons now have exactly the same rounded corners.
+
 ## 1.2.3 — 2026-10-10
 - "New table" now offers three formats: Excel workbook, CSV or JSON.
 
