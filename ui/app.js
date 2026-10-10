@@ -73,7 +73,10 @@ const I18N = {
     'sc.grid': 'In the table', 'sc.move': 'Move', 'sc.moveKey': 'Arrow keys, Tab, Page Up/Down', 'sc.extend': 'Extend selection',
     'sc.extendKey': 'Shift + arrows or click', 'sc.edit': 'Edit a cell', 'sc.editKey': 'Type, F2 or double-click',
     'sc.paste': 'Paste from Excel', 'sc.pasteKey': 'Ctrl+V', 'sc.width': 'Column width', 'sc.widthKey': 'Drag the header edge',
-    'ctx.closeOthers': 'Close Other Tabs', 'ctx.cut': 'Cut', 'ctx.paste': 'Paste', 'ctx.filterValue': 'Show Only “{v}”', 'ctx.emptyValue': '(empty)'
+    'ctx.closeOthers': 'Close Other Tabs', 'ctx.cut': 'Cut', 'ctx.paste': 'Paste', 'ctx.filterValue': 'Show Only “{v}”', 'ctx.emptyValue': '(empty)',
+    'ui.newTitle': 'New table', 'ui.create': 'Create', 'ui.new_xlsx': 'Keeps formulas and several sheets; Excel opens it directly',
+    'ui.new_csv': 'Plain text that works everywhere; formulas are stored as text and calculated by Excel',
+    'ui.fxPh': 'Value or formula, e.g. =SUM(A1:A10)'
   },
   de: {
     'menu.file': 'Datei', 'menu.edit': 'Bearbeiten', 'menu.data': 'Daten', 'menu.view': 'Ansicht', 'menu.settings': 'Einstellungen', 'menu.help': 'Hilfe',
@@ -142,7 +145,10 @@ const I18N = {
     'sc.extendKey': 'Umschalt + Pfeile oder Klick', 'sc.edit': 'Zelle bearbeiten', 'sc.editKey': 'Lostippen, F2 oder Doppelklick',
     'sc.paste': 'Aus Excel einfügen', 'sc.pasteKey': 'Strg+V', 'sc.width': 'Spaltenbreite', 'sc.widthKey': 'Kante im Spaltenkopf ziehen',
     'ctx.closeOthers': 'Andere Tabs schließen', 'ctx.cut': 'Ausschneiden', 'ctx.paste': 'Einfügen', 'ctx.filterValue': 'Nur „{v}“ anzeigen',
-    'ctx.emptyValue': '(leer)'
+    'ctx.emptyValue': '(leer)',
+    'ui.newTitle': 'Neue Tabelle', 'ui.create': 'Erstellen', 'ui.new_xlsx': 'Behält Formeln und mehrere Blätter; Excel öffnet sie direkt',
+    'ui.new_csv': 'Reiner Text, funktioniert überall; Formeln werden als Text gespeichert und von Excel berechnet',
+    'ui.fxPh': 'Wert oder Formel, z. B. =SUMME(A1:A10)'
   }
 };
 let lang = 'en';
@@ -217,11 +223,42 @@ function display(v, col) {
   const s = String(v);
   return s.length > 400 ? s.slice(0, 400) + '…' : s;
 }
-/* Column type: sampled, so huge files stay fast. */
+
+/* ---- Formulas (see formula.js). Cells starting with "=" are calculated; A1 = first data row. ---- */
+function plainValue(raw, col) {
+  if (isEmpty(raw)) return '';
+  if (typeof raw === 'number' || typeof raw === 'boolean' || raw instanceof Date) return raw;
+  for (const style of [col ? col.numStyle : 'en', 'en']) { const n = toNumber(raw, style); if (Number.isFinite(n)) return n; }
+  return raw;
+}
+function calcOf(sh) {
+  if (!sh.calc) sh.calc = Formula.makeEvaluator((r, c) => sh.rows[r] && sh.rows[r][c], () => sh.rows.length, () => sh.cols.length,
+    (raw, c) => plainValue(raw, sh.cols[c]));
+  return sh.calc;
+}
+/* What a cell holds after calculation: formulas give their result, everything else is returned as stored. */
+const cellValue = (sh, r, c) => { const raw = sh.rows[r][c]; return Formula.isFormula(raw) ? calcOf(sh).value(r, c) : raw; };
+function displayCell(sh, r, c) {
+  const raw = sh.rows[r][c], col = sh.cols[c];
+  if (!Formula.isFormula(raw)) return display(raw, col);
+  const v = calcOf(sh).value(r, c);
+  if (Formula.isError(v)) return v.code;
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (typeof v === 'number') {
+    if (settings.numLocal) return v.toLocaleString(lang, {maximumFractionDigits: 10});
+    const s = String(+v.toPrecision(15));
+    return col.numStyle === 'de' ? s.replace('.', ',') : s;
+  }
+  return display(v, col);
+}
+/* Column type: sampled, so huge files stay fast. Formula cells count with their result. */
 function detectType(sh, c) {
   const col = sh.cols[c], n = sh.rows.length, step = Math.max(1, Math.floor(n / 3000));
   const vals = [];
-  for (let i = 0; i < n && vals.length < 3000; i += step) { const v = sh.rows[i][c]; if (!isEmpty(v)) vals.push(v); }
+  for (let i = 0; i < n && vals.length < 3000; i += step) {
+    const v = cellValue(sh, i, c);
+    if (!isEmpty(v) && !Formula.isError(v)) vals.push(v);
+  }
   col.numStyle = 'en';
   if (!vals.length) { col.type = 'text'; return; }
   if (vals.every(v => typeof v === 'number')) { col.type = 'number'; return; }
@@ -258,11 +295,13 @@ function decodeText(bytes) {
   try { return {text: new TextDecoder('utf-8', {fatal: true}).decode(body), encoding: bom ? 'UTF-8 (BOM)' : 'UTF-8', bom}; }
   catch (e) { return {text: new TextDecoder('windows-1252').decode(body), encoding: 'Windows-1252', bom: false}; }
 }
-function makeSheet(name, aoa, header = true) {
+/* excelRefs: formulas come from a spreadsheet file, where row 1 holds the column names — shift them so A1 is the first data row. */
+function makeSheet(name, aoa, header = true, excelRefs = false) {
   const width = Math.min(4000, aoa.reduce((m, r) => Math.max(m, r.length), 0)) || 1;
-  const pad = r => { const out = r.slice(0, width); while (out.length < width) out.push(''); return out.map(v => v === null || v === undefined ? '' : v); };
+  const fromExcel = v => excelRefs && header && Formula.isFormula(v) ? '=' + Formula.shiftRows(v.slice(1), -1) : v;
+  const pad = r => { const out = r.slice(0, width); while (out.length < width) out.push(''); return out.map(v => v === null || v === undefined ? '' : fromExcel(v)); };
   let names, rows;
-  if (header && aoa.length) { names = pad(aoa[0]).map(rawText); rows = aoa.slice(1).map(pad); }
+  if (header && aoa.length) { names = aoa[0].slice(0, width).map(rawText); while (names.length < width) names.push(''); rows = aoa.slice(1).map(pad); }
   else { names = []; rows = aoa.map(pad); }
   const seen = new Map();
   const cols = Array.from({length: width}, (_, i) => {
@@ -312,8 +351,21 @@ function jsonToAoa(data) {
 function parseFile(bytes, name) {
   const ext = extOf(name), base = name.replace(/\.[^.]+$/, '');
   if (SHEET_EXT.includes(ext)) {
-    const wb = XLSX.read(bytes, {type: 'array', cellDates: true});
-    const sheets = wb.SheetNames.map(n => makeSheet(n, XLSX.utils.sheet_to_json(wb.Sheets[n], {header: 1, raw: true, defval: '', blankrows: false})));
+    const wb = XLSX.read(bytes, {type: 'array', cellDates: true, cellFormula: true});
+    const sheets = wb.SheetNames.map(n => {
+      const ws = wb.Sheets[n], cells = Object.keys(ws).filter(k => k[0] !== '!');
+      const formulas = cells.filter(k => ws[k].f);
+      // With formulas, keep blank rows so row numbers (and so references) stay as in Excel.
+      const aoa = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: '', blankrows: formulas.length > 0});
+      if (formulas.length && ws['!ref']) {
+        const start = XLSX.utils.decode_range(ws['!ref']).s;
+        for (const k of formulas) {
+          const {r, c} = XLSX.utils.decode_cell(k);
+          (aoa[r - start.r] = aoa[r - start.r] || [])[c - start.c] = '=' + ws[k].f;
+        }
+      }
+      return makeSheet(n, aoa, true, true);
+    });
     return {format: ext, sheets, encoding: '', delimiter: '', bom: false};
   }
   const {text, encoding, bom} = decodeText(bytes);
@@ -327,7 +379,7 @@ function parseFile(bytes, name) {
   }
   const res = Papa.parse(text, {delimiter: ext === 'tsv' || ext === 'tab' ? '\t' : '', skipEmptyLines: 'greedy'});
   const delimiter = res.meta.delimiter || ',';
-  return {format: ext === 'tab' ? 'tsv' : ext, sheets: [makeSheet(base, res.data)], encoding, bom, delimiter};
+  return {format: ext === 'tab' ? 'tsv' : ext, sheets: [makeSheet(base, res.data, true, true)], encoding, bom, delimiter};
 }
 
 /* ================= File access (native or browser) ================= */
@@ -369,11 +421,20 @@ async function openFileInfo(f) {
 }
 async function openFiles(list) { for (const f of list) await openFileInfo(f); }
 let untitledN = 1;
+/* New table: Excel workbook (keeps formulas) or CSV (plain text). */
 function newTable() {
+  const opt = (v, checked) => `<label><input type="radio" name="newfmt" value="${v}"${checked ? ' checked' : ''}><span>${esc(t('fmt.' + v))}<small>${esc(t('ui.new_' + v))}</small></span></label>`;
+  modal(t('ui.newTitle'), `<div class="fmt-list">${opt('xlsx', true)}${opt('csv', false)}</div>`, [
+    {label: t('ui.cancel'), onClick: closeModal},
+    {label: t('ui.create'), primary: true, onClick: () => { const f = $('input[name="newfmt"]:checked').value; closeModal(); createTable(f); }}
+  ]);
+}
+function createTable(format) {
   const cols = 5, rows = Array.from({length: 20}, () => Array(cols).fill(''));
-  const sh = makeSheet(t('ui.table2'), [Array.from({length: cols}, (_, i) => colName(i)), ...rows]);
-  docs.push({id: ++docSeq, name: `${t('ui.untitled')}-${untitledN++}.csv`, path: null, size: 0, format: 'csv', delimiter: ',', bom: false,
-    encoding: 'UTF-8', sheets: [sh], si: 0, dirty: false, history: [], future: [], cleanDepth: 0, isNew: true});
+  const sh = makeSheet(format === 'xlsx' ? (lang === 'de' ? 'Tabelle1' : 'Sheet1') : t('ui.table2'), [Array.from({length: cols}, (_, i) => colName(i)), ...rows]);
+  docs.push({id: ++docSeq, name: `${t('ui.untitled')}-${untitledN++}.${format}`, path: null, size: 0, format,
+    delimiter: format === 'csv' ? ',' : '', bom: false, encoding: format === 'csv' ? 'UTF-8' : '',
+    sheets: [sh], si: 0, dirty: false, history: [], future: [], cleanDepth: 0, isNew: true});
   activate(docs.length - 1);
 }
 function activate(i) {
@@ -458,21 +519,20 @@ function makeFilter(sh, c, expr) {
     const x = s.toLowerCase();
     test = v => rawText(v).toLowerCase().includes(x);
   }
-  return row => test(row[c]) !== neg;
+  return i => test(cellValue(sh, i, c)) !== neg;
 }
 function recompute(sh) {
   const q = sh.query.trim().toLowerCase();
   const fs = Object.entries(sh.filters).filter(([c, v]) => v && v.trim() && sh.cols[+c]).map(([c, v]) => makeFilter(sh, +c, v));
   const idx = [];
   for (let i = 0; i < sh.rows.length; i++) {
-    const row = sh.rows[i];
-    if (q && !row.some(v => !isEmpty(v) && rawText(v).toLowerCase().includes(q))) continue;
-    if (fs.length && !fs.every(f => f(row))) continue;
+    if (q && !sh.rows[i].some((_, c) => { const v = cellValue(sh, i, c); return !isEmpty(v) && rawText(v).toLowerCase().includes(q); })) continue;
+    if (fs.length && !fs.every(f => f(i))) continue;
     idx.push(i);
   }
   if (sh.sort.dir && sh.cols[sh.sort.c]) {
     const c = sh.sort.c, col = sh.cols[c], dir = sh.sort.dir, keys = new Map();
-    for (const i of idx) keys.set(i, sortKey(sh.rows[i][c], col));
+    for (const i of idx) keys.set(i, sortKey(cellValue(sh, i, c), col));
     idx.sort((a, b) => {
       const ka = keys.get(a), kb = keys.get(b);
       if (ka === null) return kb === null ? a - b : 1;
@@ -547,9 +607,11 @@ function renderGrid() {
     html += `<div class="g-row" style="top:${HH + r * RH}px;width:${numW + total}px;background:var(${r % 2 ? '--grid-alt' : '--grid-bg'})">` +
       `<div class="g-num${rs ? ' sel' : ''}" data-r="${r}">${sh.view[r] + 1}</div>${pad}`;
     for (let c = c0; c < c1; c++) {
-      const col = sh.cols[c], v = row[c];
-      const cls = 'g-cell' + (col.type === 'number' ? ' num' : '') + (rs && c >= C0 && c <= C1 ? ' sel' : '') + (r === s.fr && c === s.fc ? ' focus' : '');
-      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="width:${col.width}px">${esc(display(v, col))}</div>`;
+      const col = sh.cols[c], fx = Formula.isFormula(row[c]), shown = displayCell(sh, sh.view[r], c);
+      const bad = fx && /^#[A-Z/0!?]+$/.test(shown);
+      const cls = 'g-cell' + (col.type === 'number' ? ' num' : '') + (fx ? ' fx' : '') + (bad ? ' err' : '') +
+        (rs && c >= C0 && c <= C1 ? ' sel' : '') + (r === s.fr && c === s.fc ? ' focus' : '');
+      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="width:${col.width}px">${esc(shown)}</div>`;
     }
     html += '</div>';
   }
@@ -728,13 +790,31 @@ function clearCells() {
   if (ch.length) doOp({t: 'cells', ch});
 }
 
+/* ================= Formula bar ================= */
+function commitFx() {
+  const sh = sheet(), inp = $('#fxIn'); if (!sh || !sh.view.length) return;
+  const row = sh.view[sh.sel.fr], c = sh.sel.fc, old = sh.rows[row][c], val = coerce(inp.value, sh.cols[c], old);
+  if (rawText(old) !== rawText(val) || typeof old !== typeof val) doOp({t: 'cells', ch: [{r: row, c, o: old, n: val}]});
+}
+$('#fxIn').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { e.preventDefault(); commitFx(); grid.focus(); setSel(sheet().sel.fr + 1, sheet().sel.fc); }
+  else if (e.key === 'Escape') { e.preventDefault(); $('#fxIn').value = ''; grid.focus(); updateUI(); }
+});
+$('#fxIn').addEventListener('change', commitFx);
+
 /* ================= Clipboard ================= */
 function selectionTsv() {
   const sh = sheet(), {r0, r1, c0, c1} = selRange(sh.sel);
   if ((r1 - r0 + 1) * (c1 - c0 + 1) > 1e6) { toast(t('toast.tooBig')); return null; }
-  const q = v => { const s = rawText(v); return /[\t\n"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const q = s => /[\t\n"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   const lines = [];
-  for (let r = r0; r <= r1; r++) { const row = sh.rows[sh.view[r]]; lines.push(row.slice(c0, c1 + 1).map(q).join('\t')); }
+  // Formulas are copied as their results, like Excel does when pasting into other apps.
+  for (let r = r0; r <= r1; r++) {
+    const i = sh.view[r], row = sh.rows[i], out = [];
+    for (let c = c0; c <= c1; c++) out.push(q(Formula.isFormula(row[c]) ? displayCell(sh, i, c) : rawText(row[c])));
+    lines.push(out.join('\t'));
+  }
   return {text: lines.join('\r\n'), n: (r1 - r0 + 1) * (c1 - c0 + 1)};
 }
 document.addEventListener('copy', e => {
@@ -816,6 +896,7 @@ function doOp(op, forceRecalc = false) {
 }
 function afterOp(sh, op, forceRecalc) {
   const d = cur();
+  if (sh.calc) sh.calc.reset();   // any change can affect formula results
   d.dirty = d.history.length !== d.cleanDepth;
   const cols = new Set();
   const collect = o => o.t === 'cells' ? o.ch.forEach(x => cols.add(x.c)) : o.t === 'batch' ? o.ops.forEach(collect) : null;
@@ -837,18 +918,33 @@ function undoRedo(redo) {
 }
 
 /* ================= Row & column operations ================= */
+/* Inserting or deleting rows/columns rewrites formulas so they keep pointing at the same data (like Excel).
+   move(r, c) gives a cell's new position, or null when it's deleted; the rewrite is part of the same undo step. */
+function withFormulaFixups(sh, op, move) {
+  const ch = [];
+  sh.rows.forEach((row, r) => row.forEach((raw, c) => {
+    if (!Formula.isFormula(raw)) return;
+    const to = move(r, c); if (!to) return;
+    const n = '=' + Formula.mapRefs(raw.slice(1), move);
+    if (n !== raw) ch.push({r: to[0], c: to[1], o: raw, n});
+  }));
+  return ch.length ? {t: 'batch', ops: [op, {t: 'cells', ch}]} : op;
+}
+/* Counts how many of the sorted indexes lie before i, by binary search. */
+const countBefore = (sorted, i) => { let lo = 0, hi = sorted.length; while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] < i) lo = m + 1; else hi = m; } return lo; };
 function insertRow() {
   const sh = sheet(); if (!sh) return;
   const at = sh.view.length ? sh.view[sh.sel.fr] + 1 : sh.rows.length;
-  doOp({t: 'rows+', at, rows: [Array(sh.cols.length).fill('')]});
+  doOp(withFormulaFixups(sh, {t: 'rows+', at, rows: [Array(sh.cols.length).fill('')]}, (r, c) => [r >= at ? r + 1 : r, c]));
   const r = sh.view.indexOf(at);
   if (r >= 0) setSel(r, sh.sel.fc);
 }
 function deleteRows() {
   const sh = sheet(); if (!sh || !sh.view.length) return;
   const {r0, r1} = selRange(sh.sel);
-  const items = sh.view.slice(r0, r1 + 1).sort((a, b) => a - b).map(i => ({i, row: sh.rows[i]}));
-  doOp({t: 'rows-', items});
+  const gone = sh.view.slice(r0, r1 + 1).sort((a, b) => a - b), goneSet = new Set(gone);
+  const items = gone.map(i => ({i, row: sh.rows[i]}));
+  doOp(withFormulaFixups(sh, {t: 'rows-', items}, (r, c) => goneSet.has(r) ? null : [r - countBefore(gone, r), c]));
   setSel(Math.min(r0, sh.view.length - 1), sh.sel.fc);
 }
 function insertCol() {
@@ -856,16 +952,16 @@ function insertCol() {
   const at = sh.sel.fc + 1;
   let n = sh.cols.length + 1, name = t('ui.newColName', {n});
   while (sh.cols.some(c => c.name === name)) name = t('ui.newColName', {n: ++n});
-  doOp({t: 'col+', at, col: {name, type: 'text', numStyle: 'en', width: 120}, vals: []});
+  doOp(withFormulaFixups(sh, {t: 'col+', at, col: {name, type: 'text', numStyle: 'en', width: 120}, vals: []}, (r, c) => [r, c >= at ? c + 1 : c]));
   setSel(sh.sel.fr, at);
 }
 function deleteCols() {
   const sh = sheet(); if (!sh) return;
   const {c0, c1} = selRange(sh.sel);
   if (c1 - c0 + 1 >= sh.cols.length) return toast(t('toast.lastCol'));
-  const ops = [];
+  const ops = [], width = c1 - c0 + 1;
   for (let c = c1; c >= c0; c--) ops.push({t: 'col-', at: c, col: {...sh.cols[c]}, vals: sh.rows.map(r => r[c])});
-  doOp(ops.length > 1 ? {t: 'batch', ops} : ops[0]);
+  doOp(withFormulaFixups(sh, ops.length > 1 ? {t: 'batch', ops} : ops[0], (r, c) => c >= c0 && c <= c1 ? null : [r, c > c1 ? c - width : c]));
   sh.sel.ac = sh.sel.fc = Math.min(c0, sh.cols.length - 1);
   renderGrid();
 }
@@ -907,7 +1003,7 @@ function buildColPanel() {
   if (!sh || settings.dockTab !== 'column') { if (!sh) box.innerHTML = ''; return; }
   const c = sh.sel.fc, col = sh.cols[c];
   if (!col) { box.innerHTML = `<div class="empty">${esc(t('ui.noColumn'))}</div>`; return; }
-  const vals = sh.view.map(i => sh.rows[i][c]), filled = vals.filter(v => !isEmpty(v));
+  const vals = sh.view.map(i => cellValue(sh, i, c)), filled = vals.filter(v => !isEmpty(v) && !Formula.isError(v));
   const counts = new Map();
   for (const v of filled) { const k = rawText(v); counts.set(k, (counts.get(k) || 0) + 1); }
   const kv = (k, v) => `<div class="kv"><span>${esc(t(k))}</span><b title="${esc(v)}">${esc(v)}</b></div>`;
@@ -992,7 +1088,8 @@ $('#chartPanel').addEventListener('change', e => {
 });
 const cssVar = n => getComputedStyle(document.body).getPropertyValue(n).trim();
 function chartData(sh, cfg) {
-  const rows = sh.view.map(i => sh.rows[i]), xcol = sh.cols[cfg.x];
+  const used = new Set([cfg.x, ...cfg.ys]);
+  const rows = sh.view.map(i => sh.rows[i].map((_, c) => used.has(c) ? cellValue(sh, i, c) : null)), xcol = sh.cols[cfg.x];
   const ys = cfg.ys.filter(y => sh.cols[y]);
   const numOf = (r, y) => toNumber(r[y], sh.cols[y].numStyle);
   if (cfg.type === 'scatter') {
@@ -1082,39 +1179,53 @@ function typed(v, col) {
   if (col.type === 'bool' && /^(true|false)$/i.test(v.trim())) return v.trim().toLowerCase() === 'true';
   return v;
 }
-function rowsOf(sh, onlyVisible) { return onlyVisible ? sh.view.map(i => sh.rows[i]) : sh.rows; }
+/* Row indexes to write: all rows in stored order, or only the rows shown (filter and sort applied). */
+const rowIndexes = (sh, onlyVisible) => onlyVisible ? sh.view : sh.rows.map((_, i) => i);
+/* A formula as a spreadsheet file stores it: rows counted with the column-name row as row 1. */
+const toExcelFormula = (sh, raw) => '=' + (sh.header ? Formula.shiftRows(raw.slice(1), 1) : raw.slice(1));
 function serialize(d, fmt, onlyVisible, keepRaw) {
-  const sh = sheet(), cols = sh.cols, rows = rowsOf(sh, onlyVisible);
-  const utf8 = s => new TextEncoder().encode(s);
+  const sh = sheet(), cols = sh.cols, idx = rowIndexes(sh, onlyVisible);
+  // Exports write calculated results; saving a CSV in its own format keeps the formulas (Excel calculates them on open).
+  const value = (s, i, c) => { const v = cellValue(s, i, c); return Formula.isError(v) ? v.code : v; };
   if (fmt === 'csv' || fmt === 'csvSemi' || fmt === 'tsv') {
     const delim = fmt === 'tsv' ? '\t' : fmt === 'csvSemi' ? ';' : keepRaw ? d.delimiter || ',' : ',';
-    const cell = (v, col) => {
-      if (fmt === 'csvSemi' && col.type === 'number' && col.numStyle === 'en') { const n = toNumber(v, 'en'); if (Number.isFinite(n)) return String(n).replace('.', ','); }
-      return rawText(v);
+    const cell = (i, c) => {
+      const raw = sh.rows[i][c], col = cols[c];
+      if (keepRaw && Formula.isFormula(raw)) return toExcelFormula(sh, raw);
+      const v = keepRaw ? raw : value(sh, i, c);
+      if (fmt === 'csvSemi' && col.type === 'number' && (col.numStyle === 'en' || typeof v === 'number')) { const n = toNumber(v, 'en'); if (Number.isFinite(n)) return String(n).replace('.', ','); }
+      return typeof v === 'number' ? String(+v.toPrecision(15)) : rawText(v);
     };
-    const aoa = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...rows.map(r => r.map((v, i) => cell(v, cols[i])))];
+    const aoa = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...idx.map(i => cols.map((_, c) => cell(i, c)))];
     const bom = fmt === 'csvSemi' || (keepRaw && d.bom);
     return (bom ? '﻿' : '') + Papa.unparse(aoa, {delimiter: delim, newline: '\r\n'});
   }
   if (fmt === 'json' || fmt === 'jsonl') {
-    const objs = rows.map(r => Object.fromEntries(cols.map((c, i) => {
-      const v = typed(r[i], c);
+    const objs = idx.map(i => Object.fromEntries(cols.map((c, ci) => {
+      const v = typed(value(sh, i, ci), c);
       return [c.name, v instanceof Date ? isoDate(v) : v];
     })));
     return fmt === 'json' ? JSON.stringify(objs, null, 2) + '\n' : objs.map(o => JSON.stringify(o)).join('\n') + '\n';
   }
   if (fmt === 'md') {
-    const cellMd = v => rawText(v).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+    const cellMd = s => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
     return [`| ${cols.map(c => cellMd(c.name)).join(' | ')} |`,
       `|${cols.map(c => c.type === 'number' ? '---:' : ':---').join('|')}|`,
-      ...rows.map(r => `| ${r.map(cellMd).join(' | ')} |`)].join('\n') + '\n';
+      ...idx.map(i => `| ${cols.map((_, c) => cellMd(displayCell(sh, i, c))).join(' | ')} |`)].join('\n') + '\n';
   }
   if (fmt === 'xlsx' || SHEET_EXT.includes(fmt)) {
     const wb = XLSX.utils.book_new();
     d.sheets.forEach(s => {
-      const rs = s === sh ? rows : s.rows;
-      const aoa = [s.cols.map(c => c.name), ...rs.map(r => r.map((v, i) => typed(v, s.cols[i])))];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, {cellDates: true}), s.name.slice(0, 31) || 'Sheet');
+      const rs = s === sh ? idx : rowIndexes(s, false);
+      const aoa = [s.cols.map(c => c.name), ...rs.map(i => s.cols.map((col, c) => typed(value(s, i, c), col)))];
+      const ws = XLSX.utils.aoa_to_sheet(aoa, {cellDates: true});
+      // Formulas stay formulas in Excel (only when all rows are written, so references stay valid).
+      if (s !== sh || !onlyVisible) rs.forEach((i, k) => s.rows[i].forEach((raw, c) => {
+        if (!Formula.isFormula(raw)) return;
+        const addr = XLSX.utils.encode_cell({r: k + 1, c}), v = aoa[k + 1][c];
+        ws[addr] = {...(ws[addr] || {}), f: Formula.toExcel(toExcelFormula(s, raw).slice(1)), t: typeof v === 'number' ? 'n' : typeof v === 'boolean' ? 'b' : 's', v: v ?? ''};
+      }));
+      XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31) || 'Sheet');
     });
     return new Uint8Array(XLSX.write(wb, {type: 'array', bookType: fmt === 'xlsx' ? 'xlsx' : fmt === 'xlsm' ? 'xlsx' : fmt}));
   }
@@ -1187,10 +1298,15 @@ function updateUI() {
   let sel = '';
   if ((r1 > r0 || c1 > c0) && (r1 - r0 + 1) * (c1 - c0 + 1) <= 500000) {
     let n = 0, sum = 0, cnt = 0;
-    for (let r = r0; r <= r1; r++) { const row = sh.rows[sh.view[r]]; for (let c = c0; c <= c1; c++) { const v = row[c]; if (isEmpty(v)) continue; n++; const x = toNumber(v, sh.cols[c].numStyle); if (Number.isFinite(x)) { sum += x; cnt++; } } }
+    for (let r = r0; r <= r1; r++) { for (let c = c0; c <= c1; c++) { const v = cellValue(sh, sh.view[r], c); if (isEmpty(v) || Formula.isError(v)) continue; n++; const x = toNumber(v, sh.cols[c].numStyle); if (Number.isFinite(x)) { sum += x; cnt++; } } }
     sel = t('ui.selStats', {n: num(n)}) + (cnt ? ' · ' + t('ui.selSum', {v: num(sum)}) + ' · ' + t('ui.selAvg', {v: num(sum / cnt)}) : '');
   }
   $('#stSel').textContent = sel;
+  // Formula bar: address and raw content (formula) of the focused cell.
+  const fxIn = $('#fxIn'), row = sh.view.length ? sh.view[s.fr] : -1;
+  $('#fxRef').textContent = row >= 0 && col ? Formula.cellName(row, s.fc) : '';
+  fxIn.disabled = row < 0;
+  if (document.activeElement !== fxIn) fxIn.value = row >= 0 && col ? rawText(sh.rows[row][s.fc]) : '';
   $('#stFormat').textContent = FORMAT_NAMES[d.format] || d.format;
   $('#stSize').textContent = d.size ? fmtSize(d.size) : '';
 }

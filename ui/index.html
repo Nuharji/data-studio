@@ -178,6 +178,12 @@ body.compact .grid{--rh:22px}
 .g-fcell input{width:100%;height:21px;font:inherit;font-size:11px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:3px;padding:0 6px;outline:0}
 .g-fcell input:focus{border-color:var(--accent)}
 .g-fcell input.on{border-color:var(--accent);background:var(--sel)}
+.fxbar{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;background:var(--grid-head);border-bottom:1px solid var(--grid-line);flex:none}
+#fxRef{min-width:58px;padding:0 6px;font:600 12px Consolas,monospace;color:var(--strong);border-right:1px solid var(--grid-line)}
+.fx-i{font:italic 13px Georgia,serif;color:var(--dim)}
+#fxIn{flex:1;height:22px;font:12px Consolas,"Cascadia Code",monospace;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:3px;padding:0 8px;outline:0}
+#fxIn:focus{border-color:var(--accent)}
+.g-cell.err{color:var(--danger)}
 .cell-edit{position:absolute;z-index:5;font:inherit;padding:0 7px;border:2px solid var(--sel-line);background:var(--grid-bg);color:var(--strong);outline:0;box-shadow:var(--shadow)}
 .grid-empty{position:absolute;left:0;right:0;top:80px;text-align:center;color:var(--dim)}
 .sheets{display:flex;height:28px;flex:none;background:var(--chrome);border-top:1px solid var(--line);overflow-x:auto}
@@ -314,6 +320,7 @@ body.compact .grid{--rh:22px}
     <div class="tabs" id="tabs"></div>
     <div class="work mode-table" id="work" hidden>
       <div class="grid-wrap">
+        <div class="fxbar"><span id="fxRef"></span><span class="fx-i">fx</span><input id="fxIn" spellcheck="false" data-i18n-ph="ui.fxPh"></div>
         <div class="grid" id="grid" tabindex="0"><div class="g-inner" id="gInner"></div></div>
         <div class="sheets" id="sheets" hidden></div>
       </div>
@@ -367,6 +374,7 @@ body.compact .grid{--rh:22px}
 <div class="drop" id="drop" data-i18n="ui.drop"></div>
 <input type="file" id="fileIn" multiple hidden>
 
+<script src="formula.js"></script>
 <script src="native.js"></script>
 <script src="app.js"></script>
 </body>
