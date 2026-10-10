@@ -1,6 +1,8 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod engine;
+mod formula;
 mod table;
 mod xlsx;
 
@@ -231,6 +233,7 @@ fn main() {
         })
         .manage(Mutex::new(Pending { ready: false, paths: args }))
         .manage(xlsx::Styles::default())
+        .manage(engine::Engine::default())
         .invoke_handler(tauri::generate_handler![
             context_menu,
             clipboard_read,
@@ -241,6 +244,10 @@ fn main() {
             confirm,
             open_url,
             initial_files,
+            engine::engine_load,
+            engine::engine_set,
+            engine::engine_calc,
+            engine::engine_drop,
             table::table_read,
             table::table_write,
             xlsx::xlsx_read,

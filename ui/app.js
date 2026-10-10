@@ -239,17 +239,42 @@ function plainValue(raw, col) {
   for (const style of [col ? col.numStyle : 'en', 'en']) { const n = toNumber(raw, style); if (Number.isFinite(n)) return n; }
   return raw;
 }
-function calcOf(sh) {
-  if (!sh.calc) sh.calc = Formula.makeEvaluator((r, c) => sh.rows[r] && sh.rows[r][c], () => sh.rows.length, () => sh.cols.length,
-    (raw, c) => plainValue(raw, sh.cols[c]));
-  return sh.calc;
+/* Formulas are calculated in Rust (engine.rs, formula.rs): every table is mirrored there, edits are passed on, and the
+   results of all formula cells come back into sh.fv. Until the first result arrives a formula cell shows as empty. */
+let engineSeq = 0;
+const FK = (r, c) => r * 16384 + c;
+const toEngine = v => v instanceof Date ? {$d: XFormat.toSerial(v)} : v == null ? '' : v;
+const fromEngine = v => v && typeof v === 'object' ? ('$e' in v ? Formula.error(v.$e) : '$d' in v ? XFormat.fromSerial(v.$d) : v) : v;
+const hasFormulas = sh => sh.rows.some(r => r.some(Formula.isFormula));
+function engineLoad(sh) {
+  if (!invoke) return;
+  sh.eid = sh.eid || ++engineSeq;
+  sh.engineReady = invoke('engine_load', {id: sh.eid, rows: sh.rows.map(r => r.map(toEngine))});
+}
+/* Fetches the results; only the newest request for a sheet is applied. Returns true when results changed. */
+async function engineCalc(sh) {
+  if (!invoke || !sh.eid) return false;
+  const my = sh.calcSeq = (sh.calcSeq || 0) + 1;
+  if (!hasFormulas(sh)) { const had = sh.fv && sh.fv.size; sh.fv = new Map(); return !!had; }
+  await sh.engineReady;
+  const now = new Date(), today = Math.floor(now.getTime() / 86400000 - now.getTimezoneOffset() / 1440) + 25569;
+  const res = await invoke('engine_calc', {id: sh.eid, german: sh.cols.map(c => c.numStyle === 'de'), today});
+  if (my !== sh.calcSeq) return false;
+  sh.fv = new Map(res.map(([r, c, v]) => [FK(r, c), fromEngine(v)]));
+  return true;
+}
+/* After new results: column types and the filtered/sorted view can depend on them. */
+async function recalc(sh) {
+  if (!await engineCalc(sh)) return;
+  sh.cols.forEach((_, c) => { if (sh.rows.some(r => Formula.isFormula(r[c]))) detectType(sh, c); });
+  if (sh === sheet()) refresh(!!(sh.sort.dir || sh.query.trim() || Object.values(sh.filters).some(v => v && v.trim())));
 }
 /* What a cell holds after calculation: formulas give their result, everything else is returned as stored. */
-const cellValue = (sh, r, c) => { const raw = sh.rows[r][c]; return Formula.isFormula(raw) ? calcOf(sh).value(r, c) : raw; };
+const cellValue = (sh, r, c) => { const raw = sh.rows[r][c]; return Formula.isFormula(raw) ? (sh.fv && sh.fv.has(FK(r, c)) ? sh.fv.get(FK(r, c)) : '') : raw; };
 function displayCell(sh, r, c) {
   const raw = sh.rows[r][c], col = sh.cols[c];
   if (!Formula.isFormula(raw)) return display(raw, col);
-  const v = calcOf(sh).value(r, c);
+  const v = cellValue(sh, r, c);
   if (Formula.isError(v)) return v.code;
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
   if (typeof v === 'number') {
@@ -413,6 +438,7 @@ function makeSheet(name, aoa, header = true, excelRefs = false) {
   const sh = {name, header, cols, rows, view: [], sort: {c: -1, dir: 0}, filters: {}, query: '',
     sel: {ar: 0, ac: 0, fr: 0, fc: 0}, scroll: {top: 0, left: 0}, chart: null};
   detectAll(sh); measureCols(sh); recompute(sh);
+  engineLoad(sh); recalc(sh);
   return sh;
 }
 /* Excel workbooks are read in Rust (xlsx.rs) with their formatting: values, formulas, a style table, merged cells,
@@ -521,6 +547,7 @@ function activate(i) {
 async function closeTab(i) {
   const d = docs[i];
   if (d.dirty && !await ask(t('confirm.close', {name: d.name}), t('confirm.ok'))) return;
+  if (invoke) d.sheets.forEach(s => { if (s.eid) invoke('engine_drop', {id: s.eid}).catch(() => {}); });
   if (d.xtoken && invoke) invoke('xlsx_forget', {token: d.xtoken}).catch(() => {});
   docs.splice(i, 1);
   let next = active;
@@ -996,7 +1023,14 @@ function doOp(op, forceRecalc = false) {
 }
 function afterOp(sh, op, forceRecalc) {
   const d = cur();
-  if (sh.calc) sh.calc.reset();   // any change can affect formula results
+  // Pass the change on to the calculation engine: single cells directly, anything structural as the whole table.
+  const onlyCells = o => o.t === 'cells' || o.t === 'fmt' || o.t === 'rename' || (o.t === 'batch' && o.ops.every(onlyCells));
+  if (onlyCells(op)) {
+    const ch = [], add = o => o.t === 'cells' ? o.ch.forEach(x => ch.push([x.r, x.c, toEngine(sh.rows[x.r] ? sh.rows[x.r][x.c] : '')])) : o.t === 'batch' ? o.ops.forEach(add) : null;
+    add(op);
+    if (ch.length && invoke && sh.eid) sh.engineReady = Promise.resolve(sh.engineReady).then(() => invoke('engine_set', {id: sh.eid, changes: ch}));
+  } else { sh.fv = new Map(); engineLoad(sh); }
+  if (op.t !== 'fmt' && op.t !== 'rename') recalc(sh);
   d.dirty = d.history.length !== d.cleanDepth;
   const cols = new Set();
   const collect = o => o.t === 'cells' ? o.ch.forEach(x => cols.add(x.c)) : o.t === 'batch' ? o.ops.forEach(collect) : null;

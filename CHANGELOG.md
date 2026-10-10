@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0 — 2026-10-10
+- Formulas are now calculated by the app's Rust core: same functions (English and German names), German decimal commas, Excel errors and circular-reference detection as before — the table keeps a copy in Rust that every edit updates.
+- The JavaScript formula calculator is removed; only the tools that adjust references when rows or columns move remain there.
+
 ## 1.4.0 — 2026-10-10
 - CSV, TSV, JSON, JSON Lines and old spreadsheets (.xls, .ods) are now read by the app's Rust core, and CSV / JSON / Markdown files are written there — faster with big files, less JavaScript.
 - Text files: UTF-8, UTF-16 and Windows-1252 (old Excel exports) are recognised; the separator (comma, semicolon, tab, pipe) is detected from the first lines.
