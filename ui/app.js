@@ -26,7 +26,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
-const DEF = {lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
+const DEF = {autoHide: false, lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, booted = false, docSeq = 0;
 const cur = () => docs[active];
 const sheet = () => cur() && cur().sheets[cur().si];
@@ -1514,6 +1514,7 @@ const ICONS = {
 };
 const setView = v => { settings.view = v; applySettings(); };
 const A = {
+  toggleAutoHide: () => { settings.autoHide = !settings.autoHide; applySettings(); },
   openFile: async () => openFiles(await pickFiles()), newTable, save, saveAs: () => exportDialog(true), exportAs: () => exportDialog(false),
   closeTab: () => closeTab(active), undo: () => undoRedo(false), redo: () => undoRedo(true),
   copy: () => { const out = selectionTsv(); if (out) navigator.clipboard.writeText(out.text).then(() => toast(t('toast.copied', {n: num(out.n)}))); },
@@ -1581,7 +1582,7 @@ const MENUS = [
     ['sortAsc', 'Alt+ArrowUp'], ['sortDesc', 'Alt+ArrowDown'], ['toggleFilters', 'Ctrl+Shift+F', () => settings.filters], ['clearView', 'Ctrl+Shift+L'], '-',
     ['toggleHeader', null, () => sheet() && sheet().header]]],
   ['view', [['viewTable', 'Alt+1', () => settings.view === 'table'], ['viewSplit', 'Alt+2', () => settings.view === 'split'],
-    ['viewChart', 'Alt+3', () => settings.view === 'chart'], '-', ['togglePanels', 'Ctrl+\\', () => settings.dock],
+    ['viewChart', 'Alt+3', () => settings.view === 'chart'], '-', ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleAutoHide', null, () => settings.autoHide],
     ['toggleCompact', null, () => settings.compact], '-', ['exportChart']]],
   ['settings', [['settings', 'Ctrl+,'], '-', '#menu.language',
     ['langAuto', null, () => settings.lang === 'auto'], ['langEn', null, () => settings.lang === 'en'], ['langDe', null, () => settings.lang === 'de'],
@@ -1592,7 +1593,7 @@ const MENUS = [
 ];
 const KEYMAP = {};
 MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
-const NO_DOC = new Set(['openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
+const NO_DOC = new Set(['toggleAutoHide', 'openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
   'themeGithubDark', 'shortcuts', 'functions', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
 const allowed = act => act.startsWith('fmt') ? canFormat() : !!cur() || NO_DOC.has(act);
 function run(act) { if (allowed(act)) A[act](); }
@@ -1720,7 +1721,7 @@ function renderSettings() {
   const body = {
     general: `<h3>${t('set.language')}</h3><p class="hint">${t('set.languageHint')}</p>
       <select class="wide-sel" data-sel="lang">${opt('auto', t('a.langAuto'), settings.lang)}${opt('en', 'English', settings.lang)}${opt('de', 'Deutsch', settings.lang)}</select>
-      <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('reopen', t('set.reopen'))}`,
+      <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('autoHide', t('set.autoHide'))}${sw('reopen', t('set.reopen'))}`,
     appearance: `<h3>${t('set.theme')}</h3><div class="theme-grid">` + THEMES.map(th =>
       `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
        <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') + `</div>`,
@@ -1761,6 +1762,7 @@ function applyLanguage() {
 let lastView = null;
 let lastSpell = null;
 function applySettings() {
+  if (window.AutoHide) AutoHide.set(settings.autoHide);
   if (settings.spell !== lastSpell) { lastSpell = settings.spell; for (const d of docs) for (const s of d.sheets) if (s.eid) scheduleSpell(s, 50); }
   if (!THEMES.includes(settings.theme)) settings.theme = 'dark';
   const nl = effectiveLang();

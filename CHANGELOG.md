@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.0 — 2026-10-11
+- New: Auto-hide bars (View menu, or Settings → General). The menu bar, toolbar, tool rail and status bar leave the window and slide in when the mouse touches their edge; they stay while a menu is open or you type in them. Alt alone shows the top bars (Escape or a click elsewhere hides them).
+
 ## 1.8.0 — 2026-10-11
 - Spelling & grammar check for text cells, German and English, entirely on your PC: misspelled words get a red wavy underline in the cell, grammar hints a blue one. Numbers, dates and formulas are skipped.
 - Right-click an underlined word for suggestions, “Add to dictionary” (a personal dictionary shared by all Studio apps) or “Ignore”. F7 or the status bar jumps to the next cell with an issue.
