@@ -229,5 +229,16 @@
   "ui.new_xlsx": "Behält Formeln und mehrere Blätter; Excel öffnet sie direkt",
   "ui.new_csv": "Reiner Text, funktioniert überall; Formeln werden als Text gespeichert und von Excel berechnet",
   "ui.new_json": "Eine Liste von Datensätzen für Programme und Web-Apps; Formeln werden als Ergebnis gespeichert",
-  "ui.fxPh": "Wert oder Formel, z. B. =SUMME(A1:A10)"
+  "ui.fxPh": "Wert oder Formel, z. B. =SUMME(A1:A10)",
+  "a.functions": "Formelfunktionen",
+  "fn.cat.math": "Mathematik",
+  "fn.cat.stats": "Statistik",
+  "fn.cat.logic": "Logik",
+  "fn.cat.text": "Text",
+  "fn.cat.date": "Datum",
+  "fn.search": "Funktionen suchen",
+  "fn.none": "Keine Funktion gefunden.",
+  "fn.keys": "↑↓ wählen · Tab einfügen · Esc schließen",
+  "fn.more": "Umschalt+F3: alle Funktionen",
+  "fn.intro": "Eine Formel beginnt mit = in einer Zelle oder in der Bearbeitungsleiste. Beim Tippen erscheinen passende Funktionen und die Syntax der aktuellen. Klicke auf eine Zelle (oder ziehe über mehrere), um ihren Bezug einzufügen, z. B. A1 oder B2:B10; ein weiterer Klick ersetzt ihn. Argumente werden mit ; getrennt, z. B. =RUNDEN(A1;2) — englische Formeln nutzen ,."
 }

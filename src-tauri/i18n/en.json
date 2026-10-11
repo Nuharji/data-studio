@@ -229,5 +229,16 @@
   "ui.new_xlsx": "Keeps formulas and several sheets; Excel opens it directly",
   "ui.new_csv": "Plain text that works everywhere; formulas are stored as text and calculated by Excel",
   "ui.new_json": "A list of records for programs and web apps; formulas are saved as their results",
-  "ui.fxPh": "Value or formula, e.g. =SUM(A1:A10)"
+  "ui.fxPh": "Value or formula, e.g. =SUM(A1:A10)",
+  "a.functions": "Formula Functions",
+  "fn.cat.math": "Math",
+  "fn.cat.stats": "Statistics",
+  "fn.cat.logic": "Logic",
+  "fn.cat.text": "Text",
+  "fn.cat.date": "Date",
+  "fn.search": "Search functions",
+  "fn.none": "No function found.",
+  "fn.keys": "↑↓ choose · Tab insert · Esc close",
+  "fn.more": "Shift+F3: all functions",
+  "fn.intro": "Start a formula with = in a cell or in the formula bar. While you type, matching functions and the syntax of the current one appear. Click a cell (or drag over cells) to insert its reference, e.g. A1 or B2:B10; click again to replace it. Separate arguments with , — or with ; in German formulas, e.g. =RUNDEN(A1;2)."
 }

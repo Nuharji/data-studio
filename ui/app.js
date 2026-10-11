@@ -489,8 +489,10 @@ function renderGrid() {
       if (merged && merged.covered.has(r + ',' + c)) { html += `<div class="g-cell" style="width:${col.width}px;visibility:hidden"></div>`; continue; }
       const shown = shownCell(sh, sh.view[r], c, st);
       const bad = fx && /^#[A-Z/0!?]+$/.test(shown);
-      const cls = 'g-cell' + (col.type === 'number' || (st && st.nf && !st.ha && typeof cellValue(sh, sh.view[r], c) === 'number') ? ' num' : '') + (fx ? ' fx' : '') + (bad ? ' err' : '') +
+      let cls = 'g-cell' + (col.type === 'number' || (st && st.nf && !st.ha && typeof cellValue(sh, sh.view[r], c) === 'number') ? ' num' : '') + (fx ? ' fx' : '') + (bad ? ' err' : '') +
         (rs && c >= C0 && c <= C1 ? ' sel' : '') + (r === s.fr && c === s.fc ? ' focus' : '');
+      const mk = fxMarks.length ? fxMark(sh.view[r], c) : -1;
+      if (mk >= 0) cls += ' fx-ref k' + mk;
       let style = `width:${col.width}px` + (st ? ';' + XFormat.css(st, dark) : '');
       const mg = merged && merged.anchors.get(r + ',' + c);
       if (mg) {
@@ -543,6 +545,9 @@ gInner.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
   const sh = sheet(); if (!sh) return;
   const cell = e.target.closest('.g-cell'), rnum = e.target.closest('.g-num'), th = e.target.closest('.g-th');
+  // Typing a formula: a click puts the cell's reference into it instead of leaving the cell.
+  const fxIn = fxInput();
+  if (cell && fxPointable(fxIn)) { e.preventDefault(); pointAt(fxIn, +cell.dataset.r, +cell.dataset.c, e.shiftKey); dragSel = 'point'; return; }
   if (e.target.closest('[data-resize]')) return startResize(e, +e.target.dataset.resize);
   if (e.target.closest('[data-sort]') || e.target.closest('input')) return;
   stopEdit(true);
@@ -562,6 +567,11 @@ gInner.addEventListener('mousedown', e => {
 });
 gInner.addEventListener('mouseover', e => {
   if (!dragSel || !(e.buttons & 1)) { dragSel = false; return; }
+  if (dragSel === 'point') {
+    const cell = e.target.closest('.g-cell');
+    if (cell && point) pointAt(point.inp, +cell.dataset.r, +cell.dataset.c, true);
+    return;
+  }
   const s = sheet().sel;
   const cell = e.target.closest('.g-cell'), rnum = e.target.closest('.g-num'), th = e.target.closest('.g-th');
   if (dragSel === 'cell' && cell) { s.fr = +cell.dataset.r; s.fc = +cell.dataset.c; }
@@ -641,8 +651,12 @@ function startEdit(initial = null) {
   grid.append(inp); inp.focus();
   if (initial == null) inp.select();
   editor = {inp, r: s.fr, c: s.fc, sheet: sh};
+  for (const ev of ['input', 'click']) inp.addEventListener(ev, () => fxUpdate(inp));
+  inp.addEventListener('keyup', e => { if (/^Arrow|^Home$|^End$/.test(e.key)) fxUpdate(inp); });
+  fxUpdate(inp);
   inp.addEventListener('keydown', e => {
     e.stopPropagation();
+    if (fxKey(e, inp)) return;
     if (e.key === 'Escape') { e.preventDefault(); stopEdit(false); grid.focus(); }
     else if (e.key === 'Enter') { e.preventDefault(); stopEdit(true); grid.focus(); setSel(s.fr + (e.shiftKey ? -1 : 1), s.fc); }
     else if (e.key === 'Tab') { e.preventDefault(); stopEdit(true); grid.focus(); setSel(s.fr, s.fc + (e.shiftKey ? -1 : 1)); }
@@ -652,7 +666,7 @@ function startEdit(initial = null) {
 function stopEdit(commit) {
   if (!editor) return;
   const {inp, r, c, sheet: sh} = editor;
-  editor = null; inp.remove();
+  editor = null; inp.remove(); point = null; fxHide();
   if (!commit || sh !== sheet()) return;
   const row = sh.view[r]; if (row == null) return;
   const old = sh.rows[row][c], val = coerce(inp.value, sh.cols[c], old);
@@ -686,10 +700,166 @@ function commitFx() {
 }
 $('#fxIn').addEventListener('keydown', e => {
   e.stopPropagation();
+  if (fxKey(e, $('#fxIn'))) return;
   if (e.key === 'Enter') { e.preventDefault(); commitFx(); grid.focus(); setSel(sheet().sel.fr + 1, sheet().sel.fc); }
   else if (e.key === 'Escape') { e.preventDefault(); $('#fxIn').value = ''; grid.focus(); updateUI(); }
 });
 $('#fxIn').addEventListener('change', commitFx);
+
+/* ================= Formula assist: suggestions, syntax guide, picking cells ================= */
+/* The functions come from Rust (functions.rs, the same list the engine calculates). While a formula is typed — in a
+   cell or in the formula bar — matching functions are suggested and the syntax of the function around the caret is
+   shown. Where a reference can go (after =, an operator, "(" or a separator), clicking a cell inserts its name and
+   dragging inserts a range; the next click replaces it, like in Excel. References in the formula are outlined. */
+let FUNCS = [];
+const fxHelp = Object.assign(document.createElement('div'), {className: 'fx-help', hidden: true});
+document.body.append(fxHelp);
+const fnName = f => lang === 'de' ? f.de : f.name;
+const fnDesc = f => lang === 'de' ? f.desc_de : f.desc_en;
+const argSep = () => lang === 'de' ? '; ' : ', ';
+const findFn = name => { const u = name.toUpperCase(); return FUNCS.find(f => f.name === u || f.de === u); };
+/* "SUMME(Zahl1; [Zahl2]; …)" with the argument at `arg` in bold. */
+function fnSyntax(f, arg = -1) {
+  const n = f.args.length;
+  const parts = f.args.map((a, i) => {
+    let s = esc(lang === 'de' ? a.de : a.en);
+    if (a.optional) s = `[${s}]`;
+    if (arg === i || (a.repeat && i === n - 1 && arg > i)) s = `<b>${s}</b>`;
+    return s + (a.repeat ? argSep() + '…' : '');
+  });
+  return `${esc(fnName(f))}(${parts.join(argSep())})`;
+}
+/* Where the caret is in a formula: the function call around it (and which argument), a function name being typed,
+   and whether a cell reference can be inserted here. */
+function fxContext(text, pos) {
+  if (!text.startsWith('=')) return null;
+  const german = /;/.test(text.replace(/"(?:[^"]|"")*"?/g, ''));
+  const stack = [];
+  let inStr = false, word = '', start = -1, last = '=';
+  for (let i = 1; i < pos; i++) {
+    const ch = text[i];
+    if (inStr) { if (ch === '"') inStr = false; continue; }
+    if (ch === '"') { inStr = true; word = ''; last = '"'; continue; }
+    if (/[\p{L}\p{N}_.$]/u.test(ch)) { if (!word) start = i; word += ch; last = 'w'; continue; }
+    if (ch === '(') stack.push({name: word, arg: 0});
+    else if (ch === ')') stack.pop();
+    else if ((ch === ';' || (ch === ',' && !german)) && stack.length) stack[stack.length - 1].arg++;
+    word = '';
+    if (!/\s/.test(ch)) last = ch;
+  }
+  const call = [...stack].reverse().find(c => c.name && findFn(c.name));
+  return {
+    call: call ? {f: findFn(call.name), arg: call.arg} : null,
+    typing: !inStr && /^\p{L}/u.test(word) ? {prefix: word, start} : null,
+    refOk: !inStr && !word && '=(,;+-*/^&<>:'.includes(last)
+  };
+}
+let fxSugg = null;   // {items, idx, inp, start}
+function fxUpdate(inp) {
+  fxSetMarks(inp.value);
+  const ctx = fxContext(inp.value, inp.selectionStart);
+  fxSugg = null;
+  if (!ctx || !FUNCS.length) return fxHide(false);
+  let html = '', shown = null, arg = -1;
+  if (ctx.typing) {
+    const p = ctx.typing.prefix.toUpperCase();
+    const items = FUNCS.filter(f => fnName(f).startsWith(p) || f.name.startsWith(p) || f.de.startsWith(p))
+      .sort((a, b) => fnName(a).localeCompare(fnName(b)));
+    if (items.length && !(items.length === 1 && fnName(items[0]) === p && inp.value[inp.selectionStart] === '(')) {
+      fxSugg = {items, idx: 0, inp, start: ctx.typing.start};
+      html += '<div class="fx-list">' + items.slice(0, 8).map((f, i) =>
+        `<div class="fx-item${i ? '' : ' sel'}" data-i="${i}"><b>${esc(fnName(f))}</b><span>${esc(fnDesc(f))}</span></div>`).join('') + '</div>';
+      shown = items[0];
+    }
+  }
+  if (!shown && ctx.call) { shown = ctx.call.f; arg = ctx.call.arg; }
+  if (!shown) return fxHide(false);
+  html += `<div class="fx-sig">${fnSyntax(shown, arg)}</div><div class="fx-desc">${esc(fnDesc(shown))}</div>
+    <div class="fx-foot">${esc(t(fxSugg ? 'fn.keys' : 'fn.more'))}</div>`;
+  fxHelp.innerHTML = html; fxHelp.hidden = false;
+  const r = inp.getBoundingClientRect();
+  fxHelp.style.left = Math.max(4, Math.min(r.left, innerWidth - fxHelp.offsetWidth - 8)) + 'px';
+  fxHelp.style.top = (r.bottom + fxHelp.offsetHeight + 4 > innerHeight ? r.top - fxHelp.offsetHeight - 4 : r.bottom + 4) + 'px';
+}
+function fxHide(clearMarks = true) {
+  fxHelp.hidden = true; fxSugg = null;
+  if (clearMarks && fxMarks.length) { fxMarks = []; renderGrid(); }
+}
+function fxPick(i) {
+  const s = fxSugg; if (!s) return;
+  const f = s.items[i], inp = s.inp, end = inp.selectionStart, v = inp.value;
+  const name = fnName(f), open = v[end] === '(' ? '' : '(';
+  inp.value = v.slice(0, s.start) + name + open + v.slice(end);
+  const pos = s.start + name.length + 1;
+  inp.setSelectionRange(pos, pos); inp.focus();
+  fxUpdate(inp);
+}
+/* Keys for the suggestion list; true when the key was used. */
+function fxKey(e, inp) {
+  if (e.key === 'F3' && e.shiftKey) { e.preventDefault(); A.functions(); return true; }
+  if (!fxSugg || fxHelp.hidden) return false;
+  const n = Math.min(8, fxSugg.items.length);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    fxSugg.idx = (fxSugg.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    fxHelp.querySelectorAll('.fx-item').forEach((el, i) => el.classList.toggle('sel', i === fxSugg.idx));
+    const f = fxSugg.items[fxSugg.idx];
+    fxHelp.querySelector('.fx-sig').innerHTML = fnSyntax(f); fxHelp.querySelector('.fx-desc').textContent = fnDesc(f);
+    return true;
+  }
+  if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); fxPick(fxSugg.idx); return true; }
+  if (e.key === 'Escape') { e.preventDefault(); fxHelp.hidden = true; fxSugg = null; return true; }
+  return false;
+}
+fxHelp.addEventListener('mousedown', e => {
+  e.preventDefault();   // the input keeps the focus
+  const it = e.target.closest('.fx-item'); if (it) fxPick(+it.dataset.i);
+});
+for (const ev of ['input', 'click', 'keyup']) $('#fxIn').addEventListener(ev, e => { if (ev !== 'keyup' || /^Arrow|^Home$|^End$/.test(e.key)) fxUpdate($('#fxIn')); });
+$('#fxIn').addEventListener('blur', () => { fxHide(); point = null; });
+$('.fx-i').addEventListener('click', () => A.functions());
+
+/* Cell references of the formula being typed, outlined in the grid (stored rows, like the formula). */
+let fxMarks = [];
+function fxSetMarks(text) {
+  const marks = [];
+  if (text.startsWith('=')) {
+    const src = text.replace(/"(?:[^"]|"")*"?/g, m => ' '.repeat(m.length));
+    const re = /(?<![\p{L}\p{N}_.$])\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?(?![\p{L}\p{N}_(])/gu;
+    for (const m of src.matchAll(re)) {
+      const a = {r: +m[2] - 1, c: Formula.colIndex(m[1])}, b = m[3] ? {r: +m[4] - 1, c: Formula.colIndex(m[3])} : a;
+      marks.push({r0: Math.min(a.r, b.r), r1: Math.max(a.r, b.r), c0: Math.min(a.c, b.c), c1: Math.max(a.c, b.c), k: marks.length % 6});
+    }
+  }
+  if (JSON.stringify(marks) !== JSON.stringify(fxMarks)) { fxMarks = marks; renderGrid(); }
+}
+const fxMark = (row, c) => { for (const m of fxMarks) if (row >= m.r0 && row <= m.r1 && c >= m.c0 && c <= m.c1) return m.k; return -1; };
+
+/* Picking cells: the formula input being typed in, if a reference can go at its caret. */
+let point = null;   // {inp, start, end, r, c}: the reference inserted by the last click (replaced by the next one)
+function fxInput() {
+  if (editor && editor.sheet === sheet()) return editor.inp;
+  const fx = $('#fxIn');
+  return document.activeElement === fx ? fx : null;
+}
+function fxPointable(inp) {
+  if (!inp || !inp.value.startsWith('=')) return false;
+  if (point && point.inp === inp && inp.selectionStart === point.end) return true;
+  const ctx = fxContext(inp.value, inp.selectionStart);
+  return !!ctx && ctx.refOk;
+}
+function pointAt(inp, r, c, extend) {
+  const sh = sheet();
+  if (!point || point.inp !== inp || inp.selectionStart !== point.end) point = {inp, start: inp.selectionStart, end: inp.selectionEnd, r, c};
+  if (!extend) { point.r = r; point.c = c; }
+  const a = sh.view[point.r], b = sh.view[r];
+  const ref = a === b && point.c === c ? Formula.cellName(a, c)
+    : Formula.cellName(Math.min(a, b), Math.min(point.c, c)) + ':' + Formula.cellName(Math.max(a, b), Math.max(point.c, c));
+  inp.value = inp.value.slice(0, point.start) + ref + inp.value.slice(point.end);
+  point.end = point.start + ref.length;
+  inp.setSelectionRange(point.end, point.end);
+  fxUpdate(inp);
+}
 
 /* ================= Clipboard ================= */
 function selectionTsv() {
@@ -1287,6 +1457,21 @@ const A = {
       .map(([a, b]) => `<tr><td>${esc(t(a))}</td><td>${esc(t(b))}</td></tr>`).join('') + '</table>';
     modal(t('a.shortcuts'), h);
   },
+  functions: () => {
+    const cats = ['math', 'stats', 'logic', 'text', 'date'];
+    const list = q => cats.map(c => {
+      const fs = FUNCS.filter(f => f.cat === c && (!q || [f.name, f.de, fnDesc(f)].some(s => s.toLowerCase().includes(q))))
+        .sort((a, b) => fnName(a).localeCompare(fnName(b)));
+      return fs.length ? `<h4>${esc(t('fn.cat.' + c))}</h4>` + fs.map(f => `<div class="fn-row"><div class="fx-sig">${fnSyntax(f)}</div>
+        <div class="fx-desc">${esc(fnDesc(f))}${lang === 'de' && f.de !== f.name ? ` <span class="dim">(Excel: ${esc(f.name)})</span>` : ''}</div>
+        <code>${esc(lang === 'de' ? f.example_de : f.example_en)}</code></div>`).join('') : '';
+    }).join('') || `<p class="dim">${esc(t('fn.none'))}</p>`;
+    modal(t('a.functions'), `<p class="dim">${esc(t('fn.intro'))}</p>
+      <input id="fnSearch" class="field-in" spellcheck="false" placeholder="${esc(t('fn.search'))}"><div id="fnList" class="fn-list">${list('')}</div>`);
+    $('.modal').classList.add('fnwide');
+    const s = $('#fnSearch'); s.focus();
+    s.addEventListener('input', () => { $('#fnList').innerHTML = list(s.value.trim().toLowerCase()); });
+  },
   about: async () => {
     const v = invoke ? await window.__TAURI__.app.getVersion().catch(() => '') : '';
     modal(t('a.about'), `${v ? `<p><b>${t('about.version', {v: esc(v)})}</b></p>` : ''}<p>${t('about.p1')}</p><p>${t('about.p2')}</p><p>${t('about.p3')}</p>`);
@@ -1310,12 +1495,12 @@ const MENUS = [
     '-', '#menu.theme',
     ['themeDark', null, () => settings.theme === 'dark'], ['themeLight', null, () => settings.theme === 'light'],
     ['themeGithub', null, () => settings.theme === 'github'], ['themeGithubDark', null, () => settings.theme === 'github-dark']]],
-  ['help', [['shortcuts'], '-', ['about']]]
+  ['help', [['functions', 'Shift+F3'], ['shortcuts'], '-', ['about']]]
 ];
 const KEYMAP = {};
 MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
 const NO_DOC = new Set(['openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
-  'themeGithubDark', 'shortcuts', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
+  'themeGithubDark', 'shortcuts', 'functions', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
 const allowed = act => act.startsWith('fmt') ? canFormat() : !!cur() || NO_DOC.has(act);
 function run(act) { if (allowed(act)) A[act](); }
 function syncDisabled() { $$('[data-act]').forEach(b => b.disabled = !allowed(b.dataset.act)); $('#globalSearch').disabled = !cur(); }
@@ -1405,7 +1590,7 @@ window.addEventListener('keydown', e => {
 
 /* ================= Modal, toast, settings ================= */
 function modal(title, html, buttons = null) {
-  $('.modal').classList.remove('wide'); settingsOpen = false;
+  $('.modal').classList.remove('wide', 'fnwide'); settingsOpen = false;
   $('#modalTitle').textContent = title; $('#modalBody').innerHTML = html;
   const foot = $('#modalFoot');
   foot.hidden = !buttons; foot.innerHTML = '';
@@ -1432,7 +1617,7 @@ let settingsOpen = false, prefsSection = 'general';
 function setPref(k, v) { settings[k] = v; applySettings(); }
 function openSettings() {
   $('#modalFoot').hidden = false; renderSettings();
-  $('.modal').classList.add('wide'); settingsOpen = true; $('#modal').classList.add('show');
+  $('.modal').classList.remove('fnwide'); $('.modal').classList.add('wide'); settingsOpen = true; $('#modal').classList.add('show');
 }
 function renderSettings() {
   const opt = (v, label, cv) => `<option value="${v}"${v === cv ? ' selected' : ''}>${esc(label)}</option>`;
@@ -1570,6 +1755,7 @@ if (window.Native) {
 /* ================= Boot ================= */
 (async function boot() {
   if (invoke) I18N = await invoke('texts');
+  if (invoke) FUNCS = await invoke('formula_functions').catch(() => []);
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORE)); } catch (e) {}
   if (saved) { settings = {...DEF, ...saved.settings}; recent = saved.recent || []; }
@@ -1592,4 +1778,4 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__dt = {openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};
+window.__dt = {fxContext, fxUpdate, pointAt, startEdit, stopEdit, editor: () => editor, funcs: () => FUNCS, openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};

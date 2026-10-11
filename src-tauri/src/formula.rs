@@ -363,7 +363,7 @@ fn numbers(args: &[V]) -> R<Vec<f64>> {
 /// JavaScript's Math.round: halves go up.
 fn js_round(x: f64) -> f64 { (x + 0.5).floor() }
 
-fn alias(name: &str) -> &str {
+pub(crate) fn alias(name: &str) -> &str {
     match name {
         "SUMME" => "SUM", "MITTELWERT" | "MITTEL" | "AVG" => "AVERAGE", "ANZAHL" => "COUNT", "ANZAHL2" => "COUNTA", "PRODUKT" => "PRODUCT",
         "RUNDEN" => "ROUND", "AUFRUNDEN" => "ROUNDUP", "ABRUNDEN" => "ROUNDDOWN", "GANZZAHL" => "INT", "WURZEL" => "SQRT", "POTENZ" => "POWER",
@@ -393,7 +393,7 @@ fn criterion(c: &V) -> R<Box<dyn Fn(&V) -> bool>> {
     }))
 }
 
-fn call(name: &str, a: &[V], today: f64) -> R<V> {
+pub(crate) fn call(name: &str, a: &[V], today: f64) -> R<V> {
     let arg = |i: usize| a.get(i).cloned().unwrap_or(V::Empty);
     let n = |i: usize| to_num(&arg(i));
     Ok(match name {
