@@ -155,12 +155,12 @@ select:focus,input:focus{border-color:var(--accent)}
 .chart-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--dim);text-align:center;padding:24px}
 
 /* Data grid (virtualized) */
-.grid{flex:1;overflow:auto;position:relative;background:var(--grid-bg);outline:0;--rh:26px;font-variant-numeric:tabular-nums}
+.grid{flex:1;overflow:auto;position:relative;background:var(--grid-bg);outline:0;--rh:26px;--gz:1;font-size:calc(12px * var(--gz));font-variant-numeric:tabular-nums}
 body.compact .grid{--rh:22px}
 .g-inner{position:relative}
 .g-head{position:sticky;top:0;z-index:3;background:var(--grid-head)}
-.g-hrow{display:flex;height:30px;border-bottom:1px solid var(--grid-line)}
-.g-frow{display:flex;height:28px;border-bottom:1px solid var(--grid-line);background:var(--grid-head)}
+.g-hrow{display:flex;height:calc(30px * var(--gz));border-bottom:1px solid var(--grid-line)}
+.g-frow{display:flex;height:calc(28px * var(--gz));border-bottom:1px solid var(--grid-line);background:var(--grid-head)}
 .g-row{position:absolute;left:0;display:flex;height:var(--rh)}
 .g-row:nth-child(even){background:var(--grid-alt)}
 .g-cell{flex:none;height:var(--rh);line-height:var(--rh);padding:0 8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-right:1px solid var(--grid-line);border-bottom:1px solid var(--grid-line);cursor:cell}
@@ -168,7 +168,7 @@ body.compact .grid{--rh:22px}
 .g-cell.empty{color:var(--dim)}
 .g-cell.sel{background:var(--sel)}
 .g-cell.focus{box-shadow:inset 0 0 0 2px var(--sel-line)}
-.g-num{position:sticky;left:0;z-index:2;flex:none;width:var(--numw,56px);background:var(--grid-num);color:var(--dim);text-align:right;padding:0 8px;height:var(--rh);line-height:var(--rh);border-right:1px solid var(--grid-line);border-bottom:1px solid var(--grid-line);cursor:default;font-size:11px}
+.g-num{position:sticky;left:0;z-index:2;flex:none;width:var(--numw,56px);background:var(--grid-num);color:var(--dim);text-align:right;padding:0 8px;height:var(--rh);line-height:var(--rh);border-right:1px solid var(--grid-line);border-bottom:1px solid var(--grid-line);cursor:default;font-size:calc(11px * var(--gz))}
 .g-num.sel{color:var(--accent);font-weight:700;background:var(--sel)}
 .g-corner{position:sticky;left:0;z-index:4;flex:none;width:var(--numw,56px);background:var(--grid-head);border-right:1px solid var(--grid-line)}
 .g-th{flex:none;position:relative;display:flex;align-items:center;gap:6px;padding:0 6px 0 8px;border-right:1px solid var(--grid-line);font-weight:600;color:var(--strong);overflow:hidden;cursor:default}
@@ -201,6 +201,8 @@ body.compact .grid{--rh:22px}
 .fx-foot{padding:4px 10px;border-top:1px solid var(--border);color:var(--dim);font-size:11px}
 .g-cell u{text-decoration:underline wavy;text-decoration-thickness:1.5px;text-underline-offset:3px;text-decoration-skip-ink:none}
 .g-cell u.sp{text-decoration-color:#e5484d}.g-cell u.gr{text-decoration-color:#3d8ee8}
+.zoom{display:flex;align-items:center}.zoom button{background:none;border:0;color:var(--dim);height:20px;min-width:22px;border-radius:3px;font:inherit}
+.zoom button:hover{background:var(--hover);color:var(--strong)}
 .st-spell{cursor:pointer}.st-spell.has{color:#e5a100}
 .g-cell.fx-ref{box-shadow:inset 0 0 0 2px var(--fxc)}
 .g-cell.k0{--fxc:#3d8ee8}.g-cell.k1{--fxc:#e8710a}.g-cell.k2{--fxc:#b073e0}.g-cell.k3{--fxc:#2bb3a3}.g-cell.k4{--fxc:#d65b8b}.g-cell.k5{--fxc:#c28a2c}
@@ -393,6 +395,7 @@ body.compact .grid{--rh:22px}
   <span id="stSel"></span>
   <span id="stFormat"></span>
   <span id="stSize"></span>
+  <span class="zoom"><button id="zOut" data-i18n-title="a.zoomOut">&minus;</button><button id="zVal" data-i18n-title="a.zoomReset">100 %</button><button id="zIn" data-i18n-title="a.zoomIn">+</button></span>
 </footer>
 
 <div class="toast" id="toast"></div>

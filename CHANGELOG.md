@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.12.0 — 2026-10-11
+- Zoom for the table (50–200 %): text, row heights and column widths grow and shrink together. Ctrl + mouse wheel, Ctrl++ / Ctrl+0, View → Zoom In / Zoom Out / Actual Size, − 100 % + in the status bar, and a slider in Settings → Table. The zoom is remembered; column widths saved to Excel files are not changed by it.
+
 ## 1.11.0 — 2026-10-11
 - Loading information while a file opens: a card with the file name, the current step (reading the file, reading the data, preparing the table) and a real progress bar — megabytes read and, for CSV/TSV, megabytes parsed. It only appears when opening takes a moment.
 - Faster opening of large files: the file is now read and parsed in one go by the Rust core instead of being sent to the window and back (a 92 MB CSV: 11 s instead of 13 s).

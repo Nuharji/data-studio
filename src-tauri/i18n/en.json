@@ -281,5 +281,9 @@
   "keys.fixed": "{k} is reserved for “{a}”.",
   "load.read": "Reading file",
   "load.parse": "Reading the data",
-  "load.prepare": "Preparing the table"
+  "load.prepare": "Preparing the table",
+  "a.zoomIn": "Zoom In",
+  "a.zoomOut": "Zoom Out",
+  "a.zoomReset": "Actual Size (100 %)",
+  "set.zoom": "Table zoom"
 }

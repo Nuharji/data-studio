@@ -26,7 +26,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
-const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
+const DEF = {zoom: 100, keys: {}, autoHide: false, lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, booted = false, docSeq = 0;
 const cur = () => docs[active];
 const sheet = () => cur() && cur().sheets[cur().si];
@@ -444,13 +444,24 @@ function measureCols(sh) {
     col.width = Math.round(clamp(w, 64, 380));
   });
 }
-const rowH = () => settings.compact ? 22 : 26;
-const headH = () => HEAD_H + (settings.filters ? FILT_H : 0);
+/* Zoom (50–200 %): text, row height and column widths of the table scale together. Widths are stored at 100 %. */
+const Z = () => (settings.zoom || 100) / 100;
+const cw = col => Math.round(col.width * Z());
+const rowH = () => Math.round((settings.compact ? 22 : 26) * Z());
+const headH = () => Math.round((HEAD_H + (settings.filters ? FILT_H : 0)) * Z());
+const ZOOMS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200];
+function setZoom(z) {
+  settings.zoom = Math.max(50, Math.min(200, Math.round(z)));
+  applySettings();
+}
+const zoomStep = dir => { const z = settings.zoom || 100; setZoom(dir > 0 ? (ZOOMS.find(v => v > z) || 200) : ([...ZOOMS].reverse().find(v => v < z) || 50)); };
 let layoutCache = null;
 function layoutCols(sh) {
   const xs = []; let x = 0;
-  sh.cols.forEach(c => { xs.push(x); x += c.width; });
-  const numW = Math.max(48, String(sh.rows.length).length * 8 + 26);
+  sh.cols.forEach(c => { xs.push(x); x += cw(c); });
+  const numW = Math.round(Math.max(48, String(sh.rows.length).length * 8 + 26) * Z());
+  // The grid's text and row heights follow the zoom (CSS variables used by the cells).
+  grid.style.setProperty('--gz', Z()); grid.style.setProperty('--rh', rowH() + 'px');
   layoutCache = {xs, total: x, numW};
   grid.style.setProperty('--numw', numW + 'px');
   gInner.style.width = numW + x + 'px';
@@ -466,7 +477,7 @@ function renderGrid() {
   const {xs, total, numW} = layoutCache, RH = rowH(), HH = headH(), s = sh.sel;
   const top = grid.scrollTop, left = grid.scrollLeft, h = grid.clientHeight, w = grid.clientWidth;
   const r0 = Math.max(0, Math.floor((top - HH) / RH) - 4), r1 = Math.min(sh.view.length, Math.ceil((top + h) / RH) + 4);
-  let c0 = 0; while (c0 < sh.cols.length - 1 && xs[c0] + sh.cols[c0].width < left - numW - 150) c0++;
+  let c0 = 0; while (c0 < sh.cols.length - 1 && xs[c0] + cw(sh.cols[c0]) < left - numW - 150) c0++;
   let c1 = c0; while (c1 < sh.cols.length && xs[c1] < left + w + 150) c1++;
   const pad = `<div style="width:${xs[c0] || 0}px;flex:none"></div>`;
   const R0 = Math.min(s.ar, s.fr), R1 = Math.max(s.ar, s.fr), C0 = Math.min(s.ac, s.fc), C1 = Math.max(s.ac, s.fc);
@@ -477,7 +488,7 @@ function renderGrid() {
   let html = `<div class="g-head" style="width:${numW + total}px"><div class="g-hrow"><div class="g-corner"></div>${pad}`;
   for (let c = c0; c < c1; c++) {
     const col = sh.cols[c], sorted = sh.sort.c === c && sh.sort.dir;
-    html += `<div class="g-th${c >= C0 && c <= C1 ? ' sel' : ''}" data-c="${c}" style="width:${col.width}px" title="${esc(col.name)} — ${esc(t('type.' + col.type))}">` +
+    html += `<div class="g-th${c >= C0 && c <= C1 ? ' sel' : ''}" data-c="${c}" style="width:${cw(col)}px" title="${esc(col.name)} — ${esc(t('type.' + col.type))}">` +
       `<span class="tname">${esc(col.name)}</span><span class="ttype">${esc(t('tshort.' + col.type))}</span>` +
       `<button class="tsort${sorted ? ' on' : ''}" data-sort="${c}" title="${esc(t('ui.sortTip'))}">${ARROWS[sorted ? sh.sort.dir : 0]}</button>` +
       `<span class="resize" data-resize="${c}"></span></div>`;
@@ -487,7 +498,7 @@ function renderGrid() {
     html += `<div class="g-frow"><div class="g-corner"></div>${pad}`;
     for (let c = c0; c < c1; c++) {
       const v = sh.filters[c] || '';
-      html += `<div class="g-fcell" style="width:${sh.cols[c].width}px"><input data-f="${c}" value="${esc(v)}" class="${v ? 'on' : ''}" placeholder="${esc(t('ui.filterPh'))}" title="${esc(t('ui.filterHelp'))}" spellcheck="false"></div>`;
+      html += `<div class="g-fcell" style="width:${cw(sh.cols[c])}px"><input data-f="${c}" value="${esc(v)}" class="${v ? 'on' : ''}" placeholder="${esc(t('ui.filterPh'))}" title="${esc(t('ui.filterHelp'))}" spellcheck="false"></div>`;
     }
     html += '</div>';
   }
@@ -498,17 +509,17 @@ function renderGrid() {
       `<div class="g-num${rs ? ' sel' : ''}" data-r="${r}">${sh.view[r] + 1}</div>${pad}`;
     for (let c = c0; c < c1; c++) {
       const col = sh.cols[c], fx = Formula.isFormula(row[c]), st = row.fmt && row.fmt[c] != null ? styleOf(d, row.fmt[c]) : null;
-      if (merged && merged.covered.has(r + ',' + c)) { html += `<div class="g-cell" style="width:${col.width}px;visibility:hidden"></div>`; continue; }
+      if (merged && merged.covered.has(r + ',' + c)) { html += `<div class="g-cell" style="width:${cw(col)}px;visibility:hidden"></div>`; continue; }
       const shown = shownCell(sh, sh.view[r], c, st);
       const bad = fx && /^#[A-Z/0!?]+$/.test(shown);
       let cls = 'g-cell' + (col.type === 'number' || (st && st.nf && !st.ha && typeof cellValue(sh, sh.view[r], c) === 'number') ? ' num' : '') + (fx ? ' fx' : '') + (bad ? ' err' : '') +
         (rs && c >= C0 && c <= C1 ? ' sel' : '') + (r === s.fr && c === s.fc ? ' focus' : '');
       const mk = fxMarks.length ? fxMark(sh.view[r], c) : -1;
       if (mk >= 0) cls += ' fx-ref k' + mk;
-      let style = `width:${col.width}px` + (st ? ';' + XFormat.css(st, dark) : '');
+      let style = `width:${cw(col)}px` + (st ? ';' + XFormat.css(st, dark) : '');
       const mg = merged && merged.anchors.get(r + ',' + c);
       if (mg) {
-        let w = 0; for (let k = c; k < c + mg.cs && k < sh.cols.length; k++) w += sh.cols[k].width;
+        let w = 0; for (let k = c; k < c + mg.cs && k < sh.cols.length; k++) w += cw(sh.cols[k]);
         const jc = st && st.ha === 'center' || st && st.ha === 'centerContinuous' ? 'center' : st && st.ha === 'right' ? 'flex-end' : 'flex-start';
         const ai = st && st.va === 'top' ? 'flex-start' : st && st.va === 'center' ? 'center' : 'flex-end';
         style += `;width:${w}px;height:${mg.rs * RH}px;position:relative;z-index:1;display:flex;justify-content:${jc};align-items:${ai};background:${st && st.bg && !(dark && st.bg === '#FFFFFF') ? st.bg : `var(${r % 2 ? '--grid-alt' : '--grid-bg'})`}`;
@@ -548,7 +559,7 @@ function ensureVisible(r, c) {
   const y = HH + r * RH;
   if (y < grid.scrollTop + HH) grid.scrollTop = y - HH;
   else if (y + RH > grid.scrollTop + grid.clientHeight) grid.scrollTop = y + RH - grid.clientHeight;
-  const x = xs[c], w = sh.cols[c].width;
+  const x = xs[c], w = cw(sh.cols[c]);
   if (x < grid.scrollLeft) grid.scrollLeft = x;
   else if (numW + x + w > grid.scrollLeft + grid.clientWidth) grid.scrollLeft = numW + x + w - grid.clientWidth;
 }
@@ -620,7 +631,7 @@ $('#globalSearch').addEventListener('keydown', e => { if (e.key === 'Enter' || e
 function startResize(e, c) {
   e.preventDefault(); e.stopPropagation();
   const sh = sheet(), x0 = e.clientX, w0 = sh.cols[c].width;
-  const move = ev => { const col = sh.cols[c]; col.width = Math.max(40, Math.round(w0 + ev.clientX - x0)); col.xw = +((col.width - 5) / 7).toFixed(2); layoutCols(sh); renderGrid(); };
+  const move = ev => { const col = sh.cols[c]; col.width = Math.max(40, Math.round(w0 + (ev.clientX - x0) / Z())); col.xw = +((col.width - 5) / 7).toFixed(2); layoutCols(sh); renderGrid(); };
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', () => window.removeEventListener('mousemove', move), {once: true});
 }
@@ -658,7 +669,7 @@ function startEdit(initial = null) {
   const inp = document.createElement('input');
   inp.className = 'cell-edit'; inp.spellcheck = false;
   Object.assign(inp.style, {left: numW + xs[s.fc] + 'px', top: headH() + s.fr * rowH() + 'px',
-    width: Math.max(col.width, 160) + 'px', height: rowH() + 'px', textAlign: col.type === 'number' ? 'right' : 'left'});
+    width: Math.max(cw(col), 160) + 'px', height: rowH() + 'px', fontSize: 12 * Z() + 'px', textAlign: col.type === 'number' ? 'right' : 'left'});
   inp.value = initial != null ? initial : rawText(sh.rows[sh.view[s.fr]][s.fc]);
   grid.append(inp); inp.focus();
   if (initial == null) inp.select();
@@ -1577,6 +1588,7 @@ const A = {
     s.addEventListener('input', () => { $('#fnList').innerHTML = list(s.value.trim().toLowerCase()); });
   },
   nextIssue: () => nextIssue(),
+  zoomIn: () => zoomStep(1), zoomOut: () => zoomStep(-1), zoomReset: () => setZoom(100),
   about: async () => {
     const v = invoke ? await window.__TAURI__.app.getVersion().catch(() => '') : '';
     modal(t('a.about'), `${v ? `<p><b>${t('about.version', {v: esc(v)})}</b></p>` : ''}<p>${t('about.p1')}</p><p>${t('about.p2')}</p><p>${t('about.p3')}</p>`);
@@ -1594,7 +1606,7 @@ const MENUS = [
     ['toggleHeader', null, () => sheet() && sheet().header]]],
   ['view', [['viewTable', 'Alt+1', () => settings.view === 'table'], ['viewSplit', 'Alt+2', () => settings.view === 'split'],
     ['viewChart', 'Alt+3', () => settings.view === 'chart'], '-', ['togglePanels', 'Ctrl+\\', () => settings.dock], ['toggleAutoHide', null, () => settings.autoHide],
-    ['toggleCompact', null, () => settings.compact], '-', ['exportChart']]],
+    ['toggleCompact', null, () => settings.compact], '-', ['zoomIn', 'Ctrl++', null, false, ['Ctrl+=']], ['zoomOut'], ['zoomReset', 'Ctrl+0'], '-', ['exportChart']]],
   ['settings', [['settings', 'Ctrl+,'], '-', '#menu.language',
     ['langAuto', null, () => settings.lang === 'auto'], ['langEn', null, () => settings.lang === 'en'], ['langDe', null, () => settings.lang === 'de'],
     '-', '#menu.theme',
@@ -1609,7 +1621,7 @@ function buildKeymap() {
   MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
 }
 buildKeymap();
-const NO_DOC = new Set(['toggleAutoHide', 'openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
+const NO_DOC = new Set(['zoomIn', 'zoomOut', 'zoomReset', 'toggleAutoHide', 'openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
   'themeGithubDark', 'shortcuts', 'functions', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
 const allowed = act => act.startsWith('fmt') ? canFormat() : !!cur() || NO_DOC.has(act);
 function run(act) { if (allowed(act)) A[act](); }
@@ -1744,6 +1756,7 @@ function renderSettings() {
       `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
        <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') + `</div>`,
     table: `<h3>${t('set.numbers')}</h3><select class="wide-sel" data-sel="numLocal">${opt('raw', t('set.numRaw'), settings.numLocal ? 'local' : 'raw')}${opt('local', t('set.numLocal'), settings.numLocal ? 'local' : 'raw')}</select>
+      <h3>${t('set.zoom')} <span class="val">${settings.zoom || 100} %</span></h3><input type="range" data-range="zoom" min="50" max="200" step="10" value="${settings.zoom || 100}">
       <h3>${t('set.layout')}</h3>${sw('compact', t('set.compact'))}
       <h3>${t('set.spell')}</h3><p class="hint">${t('set.spellHint')}</p><select class="wide-sel" data-sel="spell">${opt('auto', t('set.spellAuto'), settings.spell)}${opt('de', 'Deutsch', settings.spell)}${opt('en', 'English', settings.spell)}${opt('off', t('set.spellOff'), settings.spell)}</select>`
   };
@@ -1770,6 +1783,13 @@ $('#modal').addEventListener('change', e => {
   if (d.sw) { settings[d.sw] = e.target.checked; applySettings(); }
 });
 $('#modal').onmousedown = e => { if (e.target.id === 'modal') closeModal(); };
+$('#modal').addEventListener('input', e => {
+  if (!settingsOpen || e.target.dataset.range !== 'zoom') return;
+  setZoom(+e.target.value); e.target.previousElementSibling.querySelector('.val').textContent = settings.zoom + ' %';
+});
+// Ctrl + mouse wheel zooms the table; the status bar has − 100 % +.
+grid.addEventListener('wheel', e => { if (!e.ctrlKey || !sheet()) return; e.preventDefault(); zoomStep(e.deltaY < 0 ? 1 : -1); }, {passive: false});
+$('#zIn').onclick = () => zoomStep(1); $('#zOut').onclick = () => zoomStep(-1); $('#zVal').onclick = () => setZoom(100);
 
 function applyLanguage() {
   document.documentElement.lang = lang;
@@ -1787,6 +1807,8 @@ function mountKeys() {
     onChange: keys => { settings.keys = keys; applySettings(); }});
 }
 function applySettings() {
+  $('#zVal').textContent = (settings.zoom || 100) + ' %';
+  if (layoutCache && sheet()) { layoutCols(sheet()); renderGrid(); }
   if (window.AutoHide) AutoHide.set(settings.autoHide);
   if (window.Shortcuts && JSON.stringify(settings.keys || {}) !== appliedKeys) {
     appliedKeys = JSON.stringify(settings.keys || {});

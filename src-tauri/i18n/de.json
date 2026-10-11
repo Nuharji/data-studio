@@ -281,5 +281,9 @@
   "keys.fixed": "{k} ist fest für „{a}“ vergeben.",
   "load.read": "Datei wird gelesen",
   "load.parse": "Daten werden gelesen",
-  "load.prepare": "Tabelle wird vorbereitet"
+  "load.prepare": "Tabelle wird vorbereitet",
+  "a.zoomIn": "Vergrößern",
+  "a.zoomOut": "Verkleinern",
+  "a.zoomReset": "Originalgröße (100 %)",
+  "set.zoom": "Zoom der Tabelle"
 }
