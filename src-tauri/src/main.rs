@@ -222,6 +222,13 @@ fn clipboard_read(app: AppHandle) -> String {
 fn clipboard_write(app: AppHandle, text: String) -> Result<(), String> {
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
+/// The app's texts in English and German (i18n/*.json, built into the program).
+#[tauri::command]
+fn texts() -> serde_json::Value {
+    let parse = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap_or_default();
+    serde_json::json!({"en": parse(include_str!("../i18n/en.json")), "de": parse(include_str!("../i18n/de.json"))})
+}
+
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).filter(|p| is_data(p)).collect();
 
@@ -236,6 +243,7 @@ fn main() {
         .manage(xlsx::Styles::default())
         .manage(engine::Engine::default())
         .invoke_handler(tauri::generate_handler![
+            texts,
             context_menu,
             clipboard_read,
             clipboard_write,

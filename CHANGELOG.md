@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.1 — 2026-10-11
+- The English and German texts are now language files (src-tauri/i18n) delivered by the app's Rust core instead of being part of the JavaScript.
+
 ## 1.6.0 — 2026-10-10
 - Column types, search, column filters and sorting are now computed by the app's Rust core — much faster with big tables (100,000 rows: sorting ~0.25 s, filtering ~0.1 s).
 - Same rules as before: numbers in English or German style, dates, yes/no columns; filters like >5, 10..20, =exact, !not; natural sort order (Datei2 before Datei10), empty cells last.
