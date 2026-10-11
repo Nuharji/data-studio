@@ -16,7 +16,7 @@ use std::{
     sync::Mutex,
 };
 use tauri::{
-    ipc::{InvokeBody, Request, Response},
+    ipc::{Request, Response},
     State,
 };
 use umya_spreadsheet::{
@@ -164,9 +164,10 @@ fn col_letters(mut c: u32) -> String {
 }
 
 #[tauri::command]
-pub async fn xlsx_read(styles: State<'_, Styles>, request: Request<'_>) -> Result<Value, String> {
-    let InvokeBody::Raw(bytes) = request.body() else { return Err("expected a binary body".into()) };
-    let (mut model, table) = read_model(bytes)?;
+pub async fn xlsx_read(app: tauri::AppHandle, styles: State<'_, Styles>, request: Request<'_>) -> Result<Value, String> {
+    let bytes = crate::request_bytes(&app, &request)?;
+    crate::progress_busy(&app, &request, "parse");
+    let (mut model, table) = read_model(&bytes)?;
     let token = {
         let mut map = styles.0.lock().unwrap();
         let t = map.keys().max().copied().unwrap_or(0) + 1;
@@ -174,6 +175,7 @@ pub async fn xlsx_read(styles: State<'_, Styles>, request: Request<'_>) -> Resul
         t
     };
     model["token"] = json!(token);
+    model["size"] = json!(bytes.len());
     Ok(model)
 }
 

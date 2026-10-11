@@ -9,7 +9,7 @@ use calamine::{open_workbook_auto_from_rs, Data, Ods, Range, Reader, Xls, Xlsb};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::io::Cursor;
-use tauri::ipc::{InvokeBody, Request, Response};
+use tauri::ipc::{Request, Response};
 
 /* ---------------- Text decoding ---------------- */
 
@@ -58,13 +58,23 @@ pub fn detect_delimiter(text: &str) -> u8 {
     best.0
 }
 
+#[cfg(test)]
 pub fn parse_csv(text: &str, delim: u8) -> Vec<Vec<Value>> {
-    csv_reader(text, delim)
-        .records()
-        .filter_map(Result::ok)
-        .filter(|r| !r.iter().all(|f| f.trim().is_empty()))
-        .map(|r| r.iter().map(|f| Value::String(f.to_string())).collect())
-        .collect()
+    parse_csv_progress(text, delim, |_| {})
+}
+
+/// Like parse_csv, telling `progress` how many bytes are done (about every 1 % of the text).
+pub fn parse_csv_progress(text: &str, delim: u8, mut progress: impl FnMut(usize)) -> Vec<Vec<Value>> {
+    let step = (text.len() / 100).max(1 << 16);
+    let mut next = step;
+    let mut out = Vec::new();
+    for r in csv_reader(text, delim).records().filter_map(Result::ok) {
+        let at = r.position().map_or(0, |p| p.byte() as usize);
+        if at >= next { progress(at); next = at + step; }
+        if r.iter().all(|f| f.trim().is_empty()) { continue; }
+        out.push(r.iter().map(|f| Value::String(f.to_string())).collect());
+    }
+    out
 }
 
 /* ---------------- JSON ---------------- */
@@ -304,11 +314,15 @@ fn header_name(req: &Request) -> String {
 
 /// Reads a data file. Body: the file's bytes; header `x-name`: its name (the extension decides the format).
 #[tauri::command]
-pub async fn table_read(request: Request<'_>) -> Result<Value, String> {
-    let InvokeBody::Raw(bytes) = request.body() else { return Err("expected a binary body".into()) };
+pub async fn table_read(app: tauri::AppHandle, request: Request<'_>) -> Result<Value, String> {
+    let bytes = crate::request_bytes(&app, &request)?;
+    let bytes: &[u8] = &bytes;
+    let size = bytes.len();
+    let csv_like = |e: &str| !matches!(e, "xls" | "ods" | "xlsb" | "json" | "jsonl" | "ndjson");
     let name = header_name(&request);
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     let base = name.rsplit_once('.').map(|(b, _)| b.to_string()).unwrap_or(name.clone());
+    if !csv_like(&ext) { crate::progress_busy(&app, &request, "parse"); }
     if matches!(ext.as_str(), "xls" | "ods" | "xlsb") {
         return Ok(json!({"format": ext, "encoding": "", "bom": false, "delimiter": "", "sheets": read_spreadsheet(bytes, &ext)?}));
     }
@@ -332,7 +346,14 @@ pub async fn table_read(request: Request<'_>) -> Result<Value, String> {
     }
     let delim = if matches!(ext.as_str(), "tsv" | "tab") { b'\t' } else { detect_delimiter(&text) };
     let format = if ext == "tab" { "tsv".to_string() } else { ext };
-    Ok(json!({"format": format, "encoding": encoding, "bom": bom, "delimiter": (delim as char).to_string(), "sheets": sheet(parse_csv(&text, delim))}))
+    // With header x-progress: "load-progress" events while the rows are read (the loading bar).
+    let id: Option<u64> = request.headers().get("x-progress").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok());
+    let total = text.len();
+    let rows = parse_csv_progress(&text, delim, |done| {
+        if let Some(id) = id { use tauri::Emitter; let _ = app.emit("load-progress", json!({"id": id, "phase": "parse", "done": done, "total": total})); }
+    });
+    if let Some(id) = id { use tauri::Emitter; let _ = app.emit("load-progress", json!({"id": id, "phase": "parse", "done": total, "total": total})); }
+    Ok(json!({"format": format, "encoding": encoding, "bom": bom, "delimiter": (delim as char).to_string(), "sheets": sheet(rows), "size": size}))
 }
 
 #[derive(Deserialize)]

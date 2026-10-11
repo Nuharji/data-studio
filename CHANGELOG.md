@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.0 — 2026-10-11
+- Loading information while a file opens: a card with the file name, the current step (reading the file, reading the data, preparing the table) and a real progress bar — megabytes read and, for CSV/TSV, megabytes parsed. It only appears when opening takes a moment.
+- Faster opening of large files: the file is now read and parsed in one go by the Rust core instead of being sent to the window and back (a 92 MB CSV: 11 s instead of 13 s).
+
 ## 1.10.0 — 2026-10-11
 - New: Settings → Shortcuts. Every menu command can get its own key: click it and press the new combination (with Ctrl or Alt, or a function key); Backspace removes a shortcut, ↺ or “Reset all” brings the defaults back. A key that another command used is moved (you get a note); system keys like Copy stay fixed. Menus, tooltips and Help → Keyboard Shortcuts show your keys.
 

@@ -266,8 +266,8 @@ function makeSheet(name, aoa, header = true, excelRefs = false) {
 }
 /* Excel workbooks are read in Rust (xlsx.rs) with their formatting: values, formulas, a style table, merged cells,
    column widths and row heights. Cell styles hang on the row arrays (row.fmt[col]), so they move with sorting, inserting and deleting. */
-async function parseXlsx(bytes, ext) {
-  const m = await invoke('xlsx_read', bytes);
+async function parseXlsx(bytes, ext, headers = {}) {
+  const m = await invoke('xlsx_read', bytes, {headers});
   const sheets = m.sheets.map(s => {
     const rows = Math.max(1, s.rows), cols = Math.max(1, s.cols);
     const aoa = Array.from({length: rows}, () => Array(cols).fill('')), fmt = [];
@@ -287,22 +287,25 @@ async function parseXlsx(bytes, ext) {
     measureCols(sh);
     return sh;
   });
-  return {format: ext, sheets, encoding: '', delimiter: '', bom: false, xtoken: m.token, xstyles: m.styles};
+  return {format: ext, sheets, encoding: '', delimiter: '', bom: false, xtoken: m.token, xstyles: m.styles, size: m.size};
 }
-async function parseFile(bytes, name) {
+/* bytes, or path: then Rust reads the file itself (no round trip of a big file) and reports progress to `job`. */
+async function parseFile(bytes, name, job = null, path = null) {
   const ext = extOf(name), base = name.replace(/\.[^.]+$/, '');
-  if ((ext === 'xlsx' || ext === 'xlsm') && invoke) return parseXlsx(bytes, ext);
+  const headers = {'x-name': encodeURIComponent(name), ...(path ? {'x-path': encodeURIComponent(path)} : {}), ...(job ? {'x-progress': String(job.id)} : {})};
+  const body = bytes || new Uint8Array(0);
+  if ((ext === 'xlsx' || ext === 'xlsm') && invoke) return parseXlsx(body, ext, headers);
   // CSV / TSV (separator detected), JSON, JSON Lines and old spreadsheets (.xls, .ods) are read in Rust (table.rs).
-  const m = await invoke('table_read', bytes, {headers: {'x-name': encodeURIComponent(name)}});
+  const m = await invoke('table_read', body, {headers});
   const fromRust = v => v && typeof v === 'object' && '$date' in v ? XFormat.fromSerial(v.$date) : v;
   const json = m.format === 'json' || m.format === 'jsonl';
   const sheets = m.sheets.map(s => makeSheet(s.name || base, s.rows.map(r => r.map(fromRust)), true, !json));
-  return {format: m.format, sheets, encoding: m.encoding, bom: m.bom, delimiter: m.delimiter};
+  return {format: m.format, sheets, encoding: m.encoding, bom: m.bom, delimiter: m.delimiter, size: m.size};
 }
 
 /* ================= File access (native or browser) ================= */
 const enc = s => encodeURIComponent(s || '');
-async function readPath(path) { return new Uint8Array(await invoke('read_file', {path})); }
+async function readPath(path, job = null) { return new Uint8Array(await invoke('read_file', {path, progress: job ? job.id : null})); }
 async function writeBytes(bytes, {path = null, name, filter, ext}) {
   if (invoke) return invoke('save_binary', bytes, {headers: {'x-path': enc(path), 'x-name': enc(name), 'x-filter': enc(filter), 'x-ext': enc(ext)}});
   const a = document.createElement('a');
@@ -328,14 +331,22 @@ async function pickFiles() {
 async function openFileInfo(f) {
   if (f.path) { const i = docs.findIndex(d => d.path === f.path); if (i >= 0) return activate(i); }
   if (![...TEXT_EXT, ...SHEET_EXT].includes(extOf(f.name))) return toast(t('toast.skipped', {name: f.name}));
-  let bytes;
-  try { bytes = f.bytes || await readPath(f.path); } catch (e) { return toast(t('toast.missing', {name: f.name})); }
-  let parsed;
-  try { parsed = await parseFile(bytes, f.name); } catch (e) { return toast(t('toast.openFail', {name: f.name, e: e.message || e})); }
-  docs.push({id: ++docSeq, name: f.name, path: f.path || null, size: f.size || bytes.length, ...parsed, si: 0,
-    dirty: false, history: [], future: [], cleanDepth: 0});
-  addRecent(f.path, f.name);
-  activate(docs.length - 1);
+  let bytes, parsed;
+  const job = window.LoadBar ? LoadBar.start(f.name) : null;
+  try {
+    // read → parse → prepare: the first two are reported by Rust while it reads the file from its path.
+    if (job) job.plan({read: {label: t('load.read'), from: 0, to: .3, next: 'parse'}, parse: {label: t('load.parse'), from: .3, to: .8, busy: true, next: 'prepare'},
+      prepare: {label: t('load.prepare'), from: .8, to: 1, busy: true}}, 'read');
+    bytes = f.bytes || null;
+    try { parsed = await parseFile(bytes, f.name, job, bytes ? null : f.path); }
+    catch (e) { return toast(/os error 2|cannot find|not found|nicht gefunden/i.test(String(e)) ? t('toast.missing', {name: f.name}) : t('toast.openFail', {name: f.name, e: e.message || e})); }
+    if (job) job.go('prepare');
+    await new Promise(r => setTimeout(r, 0));   // lets the bar show the step
+    docs.push({id: ++docSeq, name: f.name, path: f.path || null, ...parsed, size: f.size || parsed.size || (bytes ? bytes.length : 0), si: 0,
+      dirty: false, history: [], future: [], cleanDepth: 0});
+    addRecent(f.path, f.name);
+    activate(docs.length - 1);
+  } finally { if (job) job.done(); }
 }
 async function openFiles(list) { for (const f of list) await openFileInfo(f); }
 let untitledN = 1;
@@ -1900,4 +1911,4 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__dt = {runSpell, nextIssue, spellHit, spellMenu, spellAction, fxContext, fxUpdate, pointAt, startEdit, stopEdit, editor: () => editor, funcs: () => FUNCS, openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};
+window.__dt = {writeXlsx, runSpell, nextIssue, spellHit, spellMenu, spellAction, fxContext, fxUpdate, pointAt, startEdit, stopEdit, editor: () => editor, funcs: () => FUNCS, openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};

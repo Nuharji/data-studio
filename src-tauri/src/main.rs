@@ -106,10 +106,43 @@ async fn pick_files(app: AppHandle, filter_name: String) -> Vec<FileInfo> {
 }
 
 #[tauri::command]
-async fn read_file(path: String) -> Result<Response, String> {
-    fs::read(&path)
-        .map(Response::new)
-        .map_err(|e| format!("{path}: {e}"))
+async fn read_file(app: AppHandle, path: String, progress: Option<u64>) -> Result<Response, String> {
+    read_progress(&app, &path, progress).map(Response::new)
+}
+
+/// The file a request is about: read from `x-path` (with progress for `x-progress`), else the request body.
+/// Reading in Rust saves sending a big file to the UI and back.
+pub fn request_bytes<'a>(app: &AppHandle, request: &'a tauri::ipc::Request<'_>) -> Result<std::borrow::Cow<'a, [u8]>, String> {
+    let h = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
+    if let Some(path) = h("x-path").map(|p| percent_decode(&p)) {
+        return read_progress(app, &path, h("x-progress").and_then(|s| s.parse().ok())).map(std::borrow::Cow::Owned);
+    }
+    match request.body() { InvokeBody::Raw(b) => Ok(std::borrow::Cow::Borrowed(b)), _ => Err("expected a binary body".into()) }
+}
+
+/// Tells the loading bar that a step without measurable progress started (e.g. parsing an Excel file).
+pub fn progress_busy(app: &AppHandle, request: &tauri::ipc::Request<'_>, phase: &str) {
+    if let Some(id) = request.headers().get("x-progress").and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()) {
+        let _ = app.emit("load-progress", serde_json::json!({"id": id, "phase": phase, "done": 0, "total": 0}));
+    }
+}
+
+/// Reads a file in pieces; with `id`, the UI gets "load-progress" events ({id, done, total}) for its loading bar.
+pub fn read_progress(app: &AppHandle, path: &str, id: Option<u64>) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let err = |e: std::io::Error| format!("{path}: {e}");
+    let mut f = fs::File::open(path).map_err(err)?;
+    let total = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut out = Vec::with_capacity(total as usize);
+    let Some(id) = id else { f.read_to_end(&mut out).map_err(err)?; return Ok(out) };
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(err)?;
+        if n == 0 { break; }
+        out.extend_from_slice(&buf[..n]);
+        let _ = app.emit("load-progress", serde_json::json!({"id": id, "phase": "read", "done": out.len(), "total": total}));
+    }
+    Ok(out)
 }
 
 /// Writes the raw request body. Header `x-path` saves to that file; otherwise a save
