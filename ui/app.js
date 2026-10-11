@@ -44,9 +44,6 @@ function addRecent(path, name) {
 /* ================= Values: numbers, dates, display ================= */
 const NUM_EN = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 const NUM_DE = /^[+-]?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$/;
-const DATE_ISO = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
-const DATE_DE = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?: (\d{1,2}):(\d{2}))?$/;
-const BOOL = /^(true|false|yes|no|ja|nein|wahr|falsch)$/i;
 const isEmpty = v => v === null || v === undefined || v === '';
 function toNumber(v, style = 'en') {
   if (typeof v === 'number') return v;
@@ -55,14 +52,6 @@ function toNumber(v, style = 'en') {
   if (!s || s === '-' || s === '+' || s === '.') return NaN;
   if (style === 'de') return NUM_DE.test(s) ? +s.replace(/\./g, '').replace(',', '.') : NaN;
   return NUM_EN.test(s) ? +s.replace(/,/g, '') : NaN;
-}
-function toTime(v) {
-  if (v instanceof Date) return v.getTime();
-  if (typeof v !== 'string') return NaN;
-  const s = v.trim();
-  if (DATE_ISO.test(s)) return Date.parse(s.length === 10 ? s + 'T00:00:00' : s.replace(' ', 'T'));
-  const m = DATE_DE.exec(s);
-  return m ? new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)).getTime() : NaN;
 }
 const pad2 = n => String(n).padStart(2, '0');
 function isoDate(d) {
@@ -921,39 +910,35 @@ function clearView() {
 
 /* ================= Panels: column statistics, properties, chart settings ================= */
 function buildPanels() { buildColPanel(); buildProps(); buildChartPanel(); }
-function buildColPanel() {
+/* The numbers come from Rust (stats.rs), worked out on the rows the table shows; only the newest answer is drawn. */
+let colSeq = 0;
+async function buildColPanel() {
   const box = $('#colPanel'), sh = sheet();
   if (!sh || settings.dockTab !== 'column') { if (!sh) box.innerHTML = ''; return; }
   const c = sh.sel.fc, col = sh.cols[c];
   if (!col) { box.innerHTML = `<div class="empty">${esc(t('ui.noColumn'))}</div>`; return; }
-  const vals = sh.view.map(i => cellValue(sh, i, c)), filled = vals.filter(v => !isEmpty(v) && !Formula.isError(v));
-  const counts = new Map();
-  for (const v of filled) { const k = rawText(v); counts.set(k, (counts.get(k) || 0) + 1); }
+  if (!invoke || !sh.eid) return;
+  const my = ++colSeq;
+  await sh.engineReady;
+  const s = await invoke('engine_col_stats', {id: sh.eid, col: c});
+  if (my !== colSeq || sheet() !== sh || !s) return;
   const kv = (k, v) => `<div class="kv"><span>${esc(t(k))}</span><b title="${esc(v)}">${esc(v)}</b></div>`;
   let h = `<div class="col-title" title="${esc(col.name)}">${esc(col.name)}</div>
-    ${kv('ui.type', t('type.' + col.type))}${kv('ui.values', num(filled.length))}${kv('ui.empty', num(vals.length - filled.length))}${kv('ui.unique', num(counts.size))}`;
-  if (col.type === 'number') {
-    const ns = filled.map(v => toNumber(v, col.numStyle)).filter(Number.isFinite).sort((a, b) => a - b);
-    if (ns.length) {
-      const sum = ns.reduce((a, b) => a + b, 0), mid = ns.length >> 1;
-      const median = ns.length % 2 ? ns[mid] : (ns[mid - 1] + ns[mid]) / 2;
-      h += `<div class="sect">${esc(t('type.number'))}</div>${kv('ui.min', num(ns[0]))}${kv('ui.max', num(ns[ns.length - 1]))}
-        ${kv('ui.sum', num(sum))}${kv('ui.mean', num(sum / ns.length))}${kv('ui.median', num(median))}`;
-    }
-  } else if (col.type === 'date') {
-    const ts = filled.map(toTime).filter(Number.isFinite);
-    if (ts.length) {
-      const f = ms => new Date(ms).toLocaleString(lang, {dateStyle: 'medium'});
-      h += `<div class="sect">${esc(t('type.date'))}</div>${kv('ui.earliest', f(Math.min(...ts)))}${kv('ui.latest', f(Math.max(...ts)))}`;
-    }
+    ${kv('ui.type', t('type.' + col.type))}${kv('ui.values', num(s.values))}${kv('ui.empty', num(s.empty))}${kv('ui.unique', num(s.unique))}`;
+  if (s.number) {
+    const n = s.number;
+    h += `<div class="sect">${esc(t('type.number'))}</div>${kv('ui.min', num(n.min))}${kv('ui.max', num(n.max))}
+      ${kv('ui.sum', num(n.sum))}${kv('ui.mean', num(n.mean))}${kv('ui.median', num(n.median))}`;
+  } else if (s.dates) {
+    const f = serial => XFormat.fromSerial(serial).toLocaleString(lang, {dateStyle: 'medium'});
+    h += `<div class="sect">${esc(t('type.date'))}</div>${kv('ui.earliest', f(s.dates[0]))}${kv('ui.latest', f(s.dates[1]))}`;
   }
-  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (top.length && counts.size < filled.length) {
-    const max = top[0][1];
-    h += `<div class="sect">${esc(t('ui.top'))}</div><div class="bars">` + top.map(([k, n]) =>
+  if (s.top.length) {
+    const max = s.top[0][1];
+    h += `<div class="sect">${esc(t('ui.top'))}</div><div class="bars">` + s.top.map(([k, n]) =>
       `<div class="bar"><span title="${esc(k)}">${esc(k)}</span><b>${num(n)}</b><i style="width:${Math.max(2, n / max * 100)}%"></i></div>`).join('') + '</div>';
   }
-  h += `<p class="empty" style="padding:14px 0 0;text-align:left">${esc(t('ui.shownRows', {n: num(sh.view.length)}))}</p>`;
+  h += `<p class="empty" style="padding:14px 0 0;text-align:left">${esc(t('ui.shownRows', {n: num(s.shown)}))}</p>`;
   box.innerHTML = h;
 }
 const FORMAT_NAMES = {csv: 'CSV', tsv: 'TSV', txt: 'Text (CSV)', json: 'JSON', jsonl: 'JSON Lines', xlsx: 'Excel (.xlsx)', xlsm: 'Excel (.xlsm)', xls: 'Excel 97–2003 (.xls)', ods: 'OpenDocument (.ods)'};
@@ -1010,55 +995,24 @@ $('#chartPanel').addEventListener('change', e => {
   renderChart();
 });
 const cssVar = n => getComputedStyle(document.body).getPropertyValue(n).trim();
-function chartData(sh, cfg) {
-  const used = new Set([cfg.x, ...cfg.ys]);
-  const rows = sh.view.map(i => sh.rows[i].map((_, c) => used.has(c) ? cellValue(sh, i, c) : null)), xcol = sh.cols[cfg.x];
-  const ys = cfg.ys.filter(y => sh.cols[y]);
-  const numOf = (r, y) => toNumber(r[y], sh.cols[y].numStyle);
-  if (cfg.type === 'scatter') {
-    const y = ys[0]; if (y == null) return null;
-    const pts = [];
-    for (const r of rows) { const xv = xcol.type === 'date' ? toTime(r[cfg.x]) : toNumber(r[cfg.x], xcol.numStyle), yv = numOf(r, y); if (Number.isFinite(xv) && Number.isFinite(yv)) pts.push({x: xv, y: yv}); if (pts.length >= 5000) break; }
-    return {scatter: true, datasets: [{label: sh.cols[y].name, data: pts}]};
-  }
-  if (cfg.agg === 'count') {
-    const m = new Map();
-    for (const r of rows) { const k = rawText(r[cfg.x]); m.set(k, (m.get(k) || 0) + 1); }
-    let entries = [...m.entries()];
-    if (cfg.type !== 'line') entries.sort((a, b) => b[1] - a[1]);
-    entries = entries.slice(0, cfg.limit);
-    return {labels: entries.map(e => e[0]), datasets: [{label: t('agg.count'), data: entries.map(e => e[1])}]};
-  }
-  if (!ys.length) return null;
-  if (cfg.agg === 'none') {
-    const part = rows.slice(0, cfg.limit);
-    return {labels: part.map(r => rawText(r[cfg.x])), datasets: ys.map(y => ({label: sh.cols[y].name, data: part.map(r => { const n = numOf(r, y); return Number.isFinite(n) ? n : null; })}))};
-  }
-  const groups = new Map();
-  for (const r of rows) {
-    const k = rawText(r[cfg.x]);
-    let g = groups.get(k); if (!g) groups.set(k, g = ys.map(() => ({s: 0, n: 0})));
-    ys.forEach((y, j) => { const n = numOf(r, y); if (Number.isFinite(n)) { g[j].s += n; g[j].n++; } });
-  }
-  let keys = [...groups.keys()];
-  const val = (k, j) => { const g = groups.get(k)[j]; return cfg.agg === 'avg' ? (g.n ? g.s / g.n : null) : g.s; };
-  if (xcol.type === 'number' || xcol.type === 'date') {
-    const key = k => xcol.type === 'date' ? toTime(k) : toNumber(k, xcol.numStyle);
-    keys.sort((a, b) => (key(a) || 0) - (key(b) || 0));
-    keys = keys.slice(0, cfg.limit);
-  } else if (keys.length > cfg.limit || cfg.type !== 'line') {
-    keys.sort((a, b) => (val(b, 0) || 0) - (val(a, 0) || 0));
-    keys = keys.slice(0, cfg.limit);
-  }
-  return {labels: keys, datasets: ys.map((y, j) => ({label: sh.cols[y].name, data: keys.map(k => val(k, j))}))};
-}
-function renderChart() {
-  const sh = sheet();
-  if (chart) { chart.destroy(); chart = null; }
-  if (!sh || settings.view === 'table' || !window.Chart) return;
-  const cfg = chartCfg(sh), data = chartData(sh, cfg);
+/* Chart data (grouping, sum / average / count, order, limit) comes from Rust (stats.rs); this only draws it.
+   Only the newest answer is drawn. */
+let chartSeq = 0;
+async function renderChart() {
+  const sh = sheet(), my = ++chartSeq;
+  const drop = () => { if (chart) { chart.destroy(); chart = null; } };
+  if (!sh || settings.view === 'table' || !window.Chart || !invoke || !sh.eid) return drop();
+  const cfg = chartCfg(sh);
+  await sh.engineReady;
+  const res = await invoke('engine_chart', {id: sh.eid, cfg});
+  if (my !== chartSeq || sheet() !== sh) return;
+  drop();
+  const xcol = sh.cols[cfg.x], xName = xcol ? xcol.name : '';
+  // Scatter charts over a date column use time values, like before.
+  const data = res && {scatter: res.scatter, labels: res.labels, datasets: res.datasets.map(d => ({
+    label: d.y == null ? t('agg.count') : sh.cols[d.y].name,
+    data: res.scatter && xcol.type === 'date' ? d.data.map(p => ({x: XFormat.fromSerial(p.x).getTime(), y: p.y})) : d.data}))};
   const empty = $('#chartEmpty');
-  const xName = sh.cols[cfg.x] ? sh.cols[cfg.x].name : '';
   $('#chartTitle').textContent = data ? `${cfg.agg === 'count' ? t('agg.count') : cfg.ys.map(y => sh.cols[y] && sh.cols[y].name).filter(Boolean).join(', ')} ${cfg.type === 'scatter' ? '' : t('ui.byX', {x: xName})}` : '';
   empty.textContent = data ? '' : t('ui.chartNeedNumber');
   empty.hidden = !!data;
@@ -1638,4 +1592,4 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__dt = {openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, settings: () => settings};
+window.__dt = {openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};

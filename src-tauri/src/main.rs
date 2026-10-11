@@ -3,6 +3,7 @@
 
 mod engine;
 mod formula;
+mod stats;
 mod table;
 mod view;
 mod xlsx;
@@ -257,6 +258,8 @@ fn main() {
             engine::engine_set,
             engine::engine_calc,
             engine::engine_update,
+            stats::engine_col_stats,
+            stats::engine_chart,
             engine::engine_drop,
             table::table_read,
             table::table_write,

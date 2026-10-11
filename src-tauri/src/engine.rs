@@ -11,8 +11,30 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Mutex};
 use tauri::State;
 
+/// One open table: its cells, and what the last `engine_update` worked out for it (column types, formula results,
+/// visible rows) — the statistics and charts (stats.rs) use exactly what the table shows.
 #[derive(Default)]
-pub struct Engine(Mutex<HashMap<u64, Vec<Vec<V>>>>);
+pub struct Table {
+    pub rows: Vec<Vec<V>>,
+    pub types: Vec<ColType>,
+    pub fv: HashMap<(usize, usize), V>,
+    pub view: Vec<usize>,
+}
+
+impl Table {
+    /// What a cell holds after calculation (formula cells: their result).
+    pub fn value(&self, r: usize, c: usize) -> &V {
+        static EMPTY: V = V::Empty;
+        match self.rows.get(r).and_then(|row| row.get(c)) {
+            Some(v) if is_formula(v) => self.fv.get(&(r, c)).unwrap_or(&EMPTY),
+            Some(v) => v,
+            None => &EMPTY,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Engine(pub Mutex<HashMap<u64, Table>>);
 
 pub fn from_json(v: &Value) -> V {
     match v {
@@ -93,14 +115,14 @@ fn plain(v: &V, german: bool) -> V {
 #[tauri::command]
 pub fn engine_load(engine: State<Engine>, id: u64, rows: Vec<Vec<Value>>) {
     let table = rows.iter().map(|r| r.iter().map(from_json).collect()).collect();
-    engine.0.lock().unwrap().insert(id, table);
+    engine.0.lock().unwrap().insert(id, Table { rows: table, ..Default::default() });
 }
 
 /// Single cell edits: [row, col, value].
 #[tauri::command]
 pub fn engine_set(engine: State<Engine>, id: u64, changes: Vec<(usize, usize, Value)>) {
     let mut map = engine.0.lock().unwrap();
-    let Some(t) = map.get_mut(&id) else { return };
+    let Some(Table { rows: t, .. }) = map.get_mut(&id) else { return };
     for (r, c, v) in changes {
         if r >= t.len() { t.resize(r + 1, Vec::new()); }
         let row = &mut t[r];
@@ -143,15 +165,16 @@ fn calc_values(t: &[Vec<V>], german: &[bool], today: f64) -> HashMap<(usize, usi
     out
 }
 
-fn is_formula(v: &V) -> bool { matches!(v, V::Str(s) if s.len() > 1 && s.starts_with('=')) }
+pub fn is_formula(v: &V) -> bool { matches!(v, V::Str(s) if s.len() > 1 && s.starts_with('=')) }
 
 /// Everything the UI shows after a change: column types, formula results and the visible rows (search, filters,
 /// sorting). Order matters: types of plain columns decide how numbers are read ("1.234,5"), formulas are calculated
 /// with that, then columns with formulas get their type from the results.
 #[tauri::command]
 pub async fn engine_update(engine: State<'_, Engine>, id: u64, cols: usize, view: ViewReq, today: f64) -> Result<Value, String> {
-    let map = engine.0.lock().unwrap();
-    let t = map.get(&id).ok_or("table not loaded")?;
+    let mut map = engine.0.lock().unwrap();
+    let table = map.get_mut(&id).ok_or("table not loaded")?;
+    let t = &table.rows;
     let rows = t.len();
     let empty = V::Empty;
     let raw = |r: usize, c: usize| t[r].get(c).unwrap_or(&empty);
@@ -166,14 +189,16 @@ pub async fn engine_update(engine: State<'_, Engine>, id: u64, cols: usize, view
     }
     let visible = compute_view(rows, cols, &value, &types, &view);
     let values: Vec<(usize, usize, Value)> = fv.iter().map(|((r, c), v)| (*r, *c, to_json(v))).collect();
-    Ok(json!({"types": types, "values": values, "view": visible}))
+    let out = json!({"types": types, "values": values, "view": visible});
+    (table.types, table.fv, table.view) = (types, fv, visible);
+    Ok(out)
 }
 
 #[tauri::command]
 pub async fn engine_calc(engine: State<'_, Engine>, id: u64, german: Vec<bool>, today: f64) -> Result<Vec<(usize, usize, Value)>, String> {
     let map = engine.0.lock().unwrap();
     let t = map.get(&id).ok_or("table not loaded")?;
-    Ok(calc_table(t, &german, today))
+    Ok(calc_table(&t.rows, &german, today))
 }
 
 #[cfg(test)]

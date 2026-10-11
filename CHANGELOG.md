@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.2 — 2026-10-11
+- Column statistics (values, empty, unique, minimum/maximum/sum/mean/median, earliest/latest date, most frequent values) and chart data (grouping, sum/average/count, order, limit) are now worked out by the Rust core; the UI only draws them.
+
 ## 1.6.1 — 2026-10-11
 - The English and German texts are now language files (src-tauri/i18n) delivered by the app's Rust core instead of being part of the JavaScript.
 
