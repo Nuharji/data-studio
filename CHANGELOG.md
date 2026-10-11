@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0 — 2026-10-11
+- Spelling & grammar check for text cells, German and English, entirely on your PC: misspelled words get a red wavy underline in the cell, grammar hints a blue one. Numbers, dates and formulas are skipped.
+- Right-click an underlined word for suggestions, “Add to dictionary” (a personal dictionary shared by all Studio apps) or “Ignore”. F7 or the status bar jumps to the next cell with an issue.
+- Settings → Table → Spelling & grammar: Automatic (German + English), German, English or Off.
+- The portable .zip now includes the dictionaries (separate files with their own licenses, see dictionaries/README.md); the bare portable .exe has no spell check.
+
 ## 1.7.0 — 2026-10-11
 - Formula syntax guide: while typing a formula (in a cell or the formula bar), matching functions are suggested (↑↓, Tab to insert) and the syntax of the current function is shown with the current argument highlighted — in English or German.
 - Pick cells for formulas: where a reference fits (after =, an operator, a bracket or a separator), click a cell to insert it (e.g. B1) or drag over cells for a range (B1:B3); clicking again replaces it. References in the formula are outlined in color.

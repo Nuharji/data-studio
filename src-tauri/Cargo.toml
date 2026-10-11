@@ -1,6 +1,6 @@
 [package]
 name = "data-studio"
-version = "1.7.0"
+version = "1.8.0"
 description = "Viewer and editor for CSV, JSON and Excel data"
 edition = "2021"
 rust-version = "1.77"
@@ -20,6 +20,7 @@ csv = "1.4.0"
 encoding_rs = "0.8.35"
 calamine = "0.36"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
+spellbook = "0.4"
 
 [profile.release]
 codegen-units = 1

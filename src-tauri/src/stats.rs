@@ -185,6 +185,34 @@ pub fn chart_data(t: &Table, cfg: &ChartCfg) -> Option<ChartData> {
     })
 }
 
+/// Spelling and grammar issues of the text cells (columns that read as text; not formulas, numbers or dates):
+/// [row, column, text, issues] for each cell with issues (the text, so the UI only marks cells that still hold it).
+/// Same texts are checked once.
+#[tauri::command]
+pub async fn engine_spell(app: tauri::AppHandle, engine: State<'_, Engine>, id: u64, lang: String, fallback: String) -> Result<Vec<(usize, usize, String, Vec<crate::spell::Issue>)>, String> {
+    // Copy the texts out, so editing isn't blocked while checking.
+    let cells: Vec<(usize, usize, String)> = {
+        let map = engine.0.lock().unwrap();
+        let t = map.get(&id).ok_or("table not loaded")?;
+        let text_col = |c: usize| t.types.get(c).is_none_or(|ty| ty.kind == Kind::Text);
+        t.rows.iter().enumerate().flat_map(|(r, row)| row.iter().enumerate().filter_map(move |(c, v)| match v {
+            V::Str(s) if !s.starts_with('=') && s.len() <= 5000 => Some((r, c, s.clone())),
+            _ => None,
+        })).filter(|(_, c, _)| text_col(*c)).collect()
+    };
+    let mut checker = crate::spell::Checker::new(&app, &lang, &fallback);
+    let mut seen: HashMap<String, Vec<crate::spell::Issue>> = HashMap::new();
+    let mut out = Vec::new();
+    for (r, c, s) in cells {
+        let issues = match seen.get(&s) { Some(i) => i.clone(), None => { let i = checker.check(&s, &[(0, s.len())]); seen.insert(s.clone(), i.clone()); i } };
+        if !issues.is_empty() {
+            out.push((r, c, s, issues));
+            if out.len() >= 20_000 { break; }
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn engine_col_stats(engine: State<Engine>, id: u64, col: usize) -> Option<ColStats> {
     engine.0.lock().unwrap().get(&id).map(|t| col_stats(t, col))

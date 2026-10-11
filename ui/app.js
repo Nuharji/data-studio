@@ -26,7 +26,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
-const DEF = {lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table'};
+const DEF = {lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, booted = false, docSeq = 0;
 const cur = () => docs[active];
 const sheet = () => cur() && cur().sheets[cur().si];
@@ -107,6 +107,7 @@ async function engineUpdate(sh) {
   sh.fv = new Map(res.values.map(([r, c, v]) => [FK(r, c), fromEngine(v)]));
   res.types.forEach((ty, c) => { const col = sh.cols[c]; if (col) { col.type = ty.type; col.numStyle = ty.german ? 'de' : 'en'; } });
   sh.view = res.view; clampSel(sh);
+  scheduleSpell(sh);
   if (sh === sheet()) { layoutCols(sh); renderGrid(); renderSheets(); buildPanels(); renderChart(); updateUI(); }
 }
 /* Until Rust answers, the view stays usable: all rows in stored order when nothing filters or sorts; otherwise the
@@ -501,7 +502,7 @@ function renderGrid() {
         const ai = st && st.va === 'top' ? 'flex-start' : st && st.va === 'center' ? 'center' : 'flex-end';
         style += `;width:${w}px;height:${mg.rs * RH}px;position:relative;z-index:1;display:flex;justify-content:${jc};align-items:${ai};background:${st && st.bg && !(dark && st.bg === '#FFFFFF') ? st.bg : `var(${r % 2 ? '--grid-alt' : '--grid-bg'})`}`;
       }
-      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="${style}">${esc(shown)}</div>`;
+      html += `<div class="${cls}" data-r="${r}" data-c="${c}" style="${style}">${fx ? esc(shown) : spellHtml(sh, sh.view[r], c, shown)}</div>`;
     }
     html += '</div>';
   }
@@ -705,6 +706,96 @@ $('#fxIn').addEventListener('keydown', e => {
   else if (e.key === 'Escape') { e.preventDefault(); $('#fxIn').value = ''; grid.focus(); updateUI(); }
 });
 $('#fxIn').addEventListener('change', commitFx);
+
+/* ================= Spelling & grammar of text cells ================= */
+/* Text cells are checked in Rust (spell.rs; stats.rs engine_spell) a moment after the data changed — on this PC, nothing
+   is sent anywhere. Issues get a wavy underline in the cell; right-click for suggestions, F7 jumps to the next cell. */
+const ignored = new Set();   // "kind:text" ignored for this session
+let dictsMissing = false, ctxSpell = null, ctxFixes = [];
+function scheduleSpell(sh, delay = 600) { clearTimeout(sh.spellT); sh.spellT = setTimeout(() => runSpell(sh), delay); }
+async function runSpell(sh) {
+  const my = sh.spellSeq = (sh.spellSeq || 0) + 1;
+  let list = [];
+  if (invoke && sh.eid && settings.spell !== 'off') {
+    await sh.engineReady;
+    list = await invoke('engine_spell', {id: sh.eid, lang: settings.spell, fallback: lang}).catch(() => []);
+  }
+  if (my !== sh.spellSeq) return;
+  sh.spell = new Map();
+  for (const [r, c, text, issues] of list) {
+    const keep = issues.filter(i => !ignored.has(i.kind + ':' + text.slice(i.start, i.end)));
+    if (keep.length) sh.spell.set(FK(r, c), {text, issues: keep});
+  }
+  if (sh === sheet()) { renderGrid(); updateSpellStatus(); }
+}
+/* A cell's text with its issues underlined — only while it still holds the checked text. */
+function spellHtml(sh, i, c, shown) {
+  const m = sh.spell && sh.spell.get(FK(i, c));
+  if (!m || m.text !== shown) return esc(shown);
+  let h = '', at = 0;
+  m.issues.forEach((x, k) => {
+    if (x.start < at) return;
+    h += esc(shown.slice(at, x.start)) + `<u class="${x.kind === 'spell' ? 'sp' : 'gr'}" data-k="${k}">${esc(shown.slice(x.start, x.end))}</u>`;
+    at = x.end;
+  });
+  return h + esc(shown.slice(at));
+}
+function updateSpellStatus() {
+  const el = $('#stSpell'), sh = sheet(), on = !!sh && settings.spell !== 'off';
+  el.hidden = !on; if (!on) return;
+  let n = 0; if (sh.spell) for (const m of sh.spell.values()) n += m.issues.length;
+  el.classList.toggle('has', !!n);
+  el.textContent = dictsMissing ? t('sp.noDicts') : n ? t('sp.count', {n: num(n)}) : t('sp.ok');
+  el.title = dictsMissing ? t('sp.noDictsTip') : t('sp.tip');
+}
+$('#stSpell').addEventListener('click', () => nextIssue());
+/* The next cell with an issue after the selected one (in the shown order). */
+function nextIssue() {
+  const sh = sheet(); if (!sh || !sh.spell || !sh.spell.size) return toast(t('sp.ok'));
+  const n = sh.view.length, C = sh.cols.length;
+  for (let k = 0; k <= n; k++) {
+    const r = (sh.sel.fr + k) % n;
+    for (let c = k === 0 ? sh.sel.fc + 1 : 0; c < C; c++) if (sh.spell.has(FK(sh.view[r], c))) { grid.focus({preventScroll: true}); return setSel(r, c); }
+  }
+}
+/* The issue under the mouse in a cell (or the cell's first). */
+function spellHit(e, sh, cell) {
+  const i = sh.view[+cell.dataset.r], c = +cell.dataset.c, m = sh.spell && sh.spell.get(FK(i, c));
+  if (!m || rawText(sh.rows[i][c]) !== m.text) return null;
+  const u = e.target.closest('u[data-k]');
+  return {sh, i, c, text: m.text, issue: m.issues[u ? +u.dataset.k : 0]};
+}
+async function spellMenu(hit) {
+  ctxSpell = hit;
+  const x = hit.issue, word = hit.text.slice(x.start, x.end);
+  if (x.kind === 'spell') {
+    ctxFixes = await invoke('spell_suggest', {word, lang: settings.spell}).catch(() => []);
+    return [...(ctxFixes.length ? ctxFixes.map((s, k) => ({id: 'sp:fix:' + k, label: s})) : [{id: 'sp:none', label: t('sp.noSuggestions'), enabled: false}]),
+      null, {id: 'sp:add', label: t('sp.add', {w: word})}, {id: 'sp:ignore', label: t('sp.ignore')}];
+  }
+  ctxFixes = x.fix;
+  return [{id: 'sp:rule', label: t('sp.rule.' + x.kind), enabled: false},
+    ...x.fix.map((s, k) => ({id: 'sp:fix:' + k, label: t('sp.fix.' + x.kind, {s})})), null, {id: 'sp:ignore', label: t('sp.ignore')}];
+}
+async function spellAction(id) {
+  const h = ctxSpell; if (!h) return;
+  const old = h.sh.rows[h.i][h.c], x = h.issue, word = h.text.slice(x.start, x.end);
+  if (rawText(old) !== h.text) return;
+  if (id.startsWith('sp:fix:')) {
+    doOp({t: 'cells', ch: [{r: h.i, c: h.c, o: old, n: h.text.slice(0, x.start) + ctxFixes[+id.slice(7)] + h.text.slice(x.end)}]});
+  } else if (id === 'sp:add') {
+    await invoke('spell_add', {word}).catch(e => toast(String(e)));
+    runSpell(h.sh);
+  } else if (id === 'sp:ignore') {
+    ignored.add(x.kind + ':' + word);
+    for (const [k, m] of h.sh.spell) {
+      m.issues = m.issues.filter(i => !(i.kind === x.kind && m.text.slice(i.start, i.end) === word));
+      if (!m.issues.length) h.sh.spell.delete(k);
+    }
+    renderGrid(); updateSpellStatus();
+  }
+  grid.focus({preventScroll: true});
+}
 
 /* ================= Formula assist: suggestions, syntax guide, picking cells ================= */
 /* The functions come from Rust (functions.rs, the same list the engine calculates). While a formula is typed — in a
@@ -1361,6 +1452,7 @@ function exportDialog(saveAs) {
 
 /* ================= Status & title ================= */
 function updateUI() {
+  updateSpellStatus();
   const d = cur(), sh = sheet();
   $('#apptitle').textContent = d ? `${d.name}${d.dirty ? ' ●' : ''}  —  Data Studio` : 'Data Studio';
   document.title = d ? `${d.dirty ? '● ' : ''}${d.name} — Data Studio` : 'Data Studio';
@@ -1472,6 +1564,7 @@ const A = {
     const s = $('#fnSearch'); s.focus();
     s.addEventListener('input', () => { $('#fnList').innerHTML = list(s.value.trim().toLowerCase()); });
   },
+  nextIssue: () => nextIssue(),
   about: async () => {
     const v = invoke ? await window.__TAURI__.app.getVersion().catch(() => '') : '';
     modal(t('a.about'), `${v ? `<p><b>${t('about.version', {v: esc(v)})}</b></p>` : ''}<p>${t('about.p1')}</p><p>${t('about.p2')}</p><p>${t('about.p3')}</p>`);
@@ -1481,7 +1574,7 @@ const A = {
 const MENUS = [
   ['file', [['openFile', 'Ctrl+O'], ['newTable', 'Alt+N'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], ['exportAs', 'Ctrl+E'], '-', ['closeTab', 'Alt+W']]],
   ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['copy', 'Ctrl+C', null, true], ['selectAll', 'Ctrl+A', null, true], '-',
-    ['editCell', 'F2', null, true], ['clearCells', 'Delete', null, true], '-', ['find', 'Ctrl+F']]],
+    ['editCell', 'F2', null, true], ['clearCells', 'Delete', null, true], '-', ['find', 'Ctrl+F'], ['nextIssue', 'F7']]],
   ['format', [['fmtBold', 'Ctrl+B'], ['fmtItalic', 'Ctrl+I'], ['fmtUnderline', 'Ctrl+U'], ['fmtStrike', 'Ctrl+5'], '-',
     ['fmtFontColor'], ['fmtFill'], ['fmtNoFill'], ['fmtBorders'], '-', ['fmtAlignLeft'], ['fmtAlignCenter'], ['fmtAlignRight'], ['fmtWrap'], '-', ['fmtNumber'], ['fmtClear']]],
   ['data', [['insertRow', 'Ctrl+Enter'], ['deleteRows', 'Ctrl+-'], ['insertCol', 'Ctrl+Shift+Enter'], ['deleteCol', 'Ctrl+Shift+-'], ['renameCol'], '-',
@@ -1632,7 +1725,8 @@ function renderSettings() {
       `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
        <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') + `</div>`,
     table: `<h3>${t('set.numbers')}</h3><select class="wide-sel" data-sel="numLocal">${opt('raw', t('set.numRaw'), settings.numLocal ? 'local' : 'raw')}${opt('local', t('set.numLocal'), settings.numLocal ? 'local' : 'raw')}</select>
-      <h3>${t('set.layout')}</h3>${sw('compact', t('set.compact'))}`
+      <h3>${t('set.layout')}</h3>${sw('compact', t('set.compact'))}
+      <h3>${t('set.spell')}</h3><p class="hint">${t('set.spellHint')}</p><select class="wide-sel" data-sel="spell">${opt('auto', t('set.spellAuto'), settings.spell)}${opt('de', 'Deutsch', settings.spell)}${opt('en', 'English', settings.spell)}${opt('off', t('set.spellOff'), settings.spell)}</select>`
   };
   $('#modalTitle').textContent = t('set.title');
   $('#modalBody').innerHTML = `<div class="prefs"><nav>${['general', 'appearance', 'table'].map(k =>
@@ -1665,7 +1759,9 @@ function applyLanguage() {
   if (booted) { renderTabs(); renderRecent(); refresh(); updateUI(); syncDisabled(); }
 }
 let lastView = null;
+let lastSpell = null;
 function applySettings() {
+  if (settings.spell !== lastSpell) { lastSpell = settings.spell; for (const d of docs) for (const s of d.sheets) if (s.eid) scheduleSpell(s, 50); }
   if (!THEMES.includes(settings.theme)) settings.theme = 'dark';
   const nl = effectiveLang();
   if (nl !== lang) { lang = nl; applyLanguage(); }
@@ -1718,9 +1814,11 @@ if (window.Native) {
       const r = +cell.dataset.r, c = +cell.dataset.c;
       if (r < r0 || r > r1 || c < c0 || c > c1) setSel(r, c);
       const v = rawText(sh.rows[sh.view[s.fr]][s.fc]);
-      return [...clip, null, item('insertRow'), item('deleteRows'), null, item('insertCol'), item('deleteCol'), item('renameCol'), null,
+      const base = [...clip, null, item('insertRow'), item('deleteRows'), null, item('insertCol'), item('deleteCol'), item('renameCol'), null,
         item('sortAsc'), item('sortDesc'), {id: 'ctx:filterValue', label: t('ctx.filterValue', {v: v ? (v.length > 28 ? v.slice(0, 28) + '…' : v) : t('ctx.emptyValue')})},
         null, item('clearCells')];
+      const hit = spellHit(e, sh, cell);
+      return hit ? spellMenu(hit).then(items => [...items, null, ...base]) : base;
     }
     if (th) {
       const c = +th.dataset.c;
@@ -1732,6 +1830,7 @@ if (window.Native) {
     return [...clip, null, item('insertRow'), item('deleteRows')];
   });
   Native.setHandler(async id => {
+    if (id.startsWith('sp:')) return spellAction(id);
     if (id.startsWith('nf:')) { const c = (numberFormatMenu.list || NUM_FORMATS)[+id.slice(3)]; if (c) applyFormat({nf: c === 'General' ? null : c}); return grid.focus(); }
     if (id === 'tab:close') return closeTab(ctxTab);
     if (id === 'tab:others') { const keep = docs[ctxTab]; for (const x of [...docs]) if (x !== keep) await closeTab(docs.indexOf(x)); return; }
@@ -1756,6 +1855,8 @@ if (window.Native) {
 (async function boot() {
   if (invoke) I18N = await invoke('texts');
   if (invoke) FUNCS = await invoke('formula_functions').catch(() => []);
+  // Loads the dictionaries in the background, so the first check is quick.
+  if (invoke) invoke('spell_ready').then(([de, en]) => { dictsMissing = !de && !en; updateSpellStatus(); }).catch(() => {});
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORE)); } catch (e) {}
   if (saved) { settings = {...DEF, ...saved.settings}; recent = saved.recent || []; }
@@ -1778,4 +1879,4 @@ if (window.Native) {
 })();
 
 // Exposed for automated UI tests in a browser.
-window.__dt = {fxContext, fxUpdate, pointAt, startEdit, stopEdit, editor: () => editor, funcs: () => FUNCS, openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};
+window.__dt = {runSpell, nextIssue, spellHit, spellMenu, spellAction, fxContext, fxUpdate, pointAt, startEdit, stopEdit, editor: () => editor, funcs: () => FUNCS, openFiles, A, cur, sheet, serialize, parseFile, doOp, undoRedo, setSel, engineUpdate, refresh, pasteText, buildColPanel, renderChart, chartCfg, chart: () => chart, settings: () => settings};
