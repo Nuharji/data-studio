@@ -285,5 +285,6 @@
   "a.zoomIn": "Zoom In",
   "a.zoomOut": "Zoom Out",
   "a.zoomReset": "Actual Size (100 %)",
-  "set.zoom": "Table zoom"
+  "set.zoom": "Table zoom",
+  "toast.savedUtf8": "Saved “{name}” as UTF-8: some characters don’t fit Windows-1252. Excel still opens it correctly."
 }

@@ -30,6 +30,26 @@ pub fn decode(bytes: &[u8]) -> (String, &'static str, bool) {
     }
 }
 
+/// CSV text (UTF-8) in the file's encoding. Windows-1252 that can't hold a character becomes UTF-8 with BOM, which Excel
+/// also reads correctly (the UI notices the BOM and tells the user).
+pub fn encode_csv(utf8: Vec<u8>, encoding: &str, bom: bool) -> Vec<u8> {
+    let text = String::from_utf8(utf8).unwrap_or_default();
+    match encoding {
+        "Windows-1252" => {
+            let (b, _, unmappable) = encoding_rs::WINDOWS_1252.encode(&text);
+            if !unmappable { return b.into_owned(); }
+            [&[0xEF, 0xBB, 0xBF][..], text.as_bytes()].concat()
+        }
+        "UTF-16 LE" | "UTF-16 BE" => {
+            let le = encoding == "UTF-16 LE";
+            let mut out = if le { vec![0xFF, 0xFE] } else { vec![0xFE, 0xFF] };
+            for u in text.encode_utf16() { out.extend(if le { u.to_le_bytes() } else { u.to_be_bytes() }); }
+            out
+        }
+        _ => [if bom { &[0xEF, 0xBB, 0xBF][..] } else { &[][..] }, text.as_bytes()].concat(),
+    }
+}
+
 /* ---------------- CSV ---------------- */
 
 fn csv_reader(text: &str, delim: u8) -> csv::Reader<&[u8]> {
@@ -376,6 +396,9 @@ pub struct WriteReq {
     /// For csv: "\n" keeps a file's LF line endings; anything else writes CRLF (the CSV standard).
     #[serde(default)]
     eol: Option<String>,
+    /// For csv: the file's encoding as reported by `decode` ("Windows-1252", "UTF-16 LE", …); default UTF-8.
+    #[serde(default)]
+    encoding: Option<String>,
     /// For json/jsonl/md: the column names; `rows` then hold only data.
     #[serde(default)]
     columns: Vec<String>,
@@ -403,7 +426,8 @@ pub fn write_table(req: &WriteReq) -> Result<Vec<u8>, String> {
             for row in &req.rows {
                 w.write_record(row.iter().map(text_of)).map_err(|e| e.to_string())?;
             }
-            out.extend(w.into_inner().map_err(|e| e.to_string())?);
+            let body = w.into_inner().map_err(|e| e.to_string())?;
+            return Ok(encode_csv(body, req.encoding.as_deref().unwrap_or("UTF-8"), req.bom));
         }
         "json" | "jsonl" => {
             let objs: Vec<Value> = req
@@ -458,11 +482,30 @@ mod tests {
         assert_eq!(from_open_formula("of:=IF([.A1]>1;\"a;b\";0.5)"), "IF(A1>1,\"a;b\",0.5)");
     }
     #[test]
+    fn encodings_round_trip() {
+        let ansi = b"Name;Stadt\r\nM\xfcller;K\xf6ln \x80\r\n".to_vec();
+        let (text, enc, bom) = decode(&ansi);
+        assert_eq!((enc, bom), ("Windows-1252", false));
+        let rows: Vec<Vec<Value>> = parse_csv(&text, b';');
+        let req = |enc: &str, rows: Vec<Vec<Value>>| WriteReq { format: "csv".into(), delimiter: Some(";".into()), bom: false, eol: Some("\r\n".into()),
+            encoding: Some(enc.into()), columns: vec![], numeric: vec![], rows };
+        assert_eq!(write_table(&req(enc, rows.clone())).unwrap(), ansi);
+        // A character Windows-1252 lacks: UTF-8 with BOM.
+        let mut more = rows.clone(); more[1][0] = json!("Müller 😀");
+        let b = write_table(&req(enc, more)).unwrap();
+        assert!(b.starts_with(&[0xEF, 0xBB, 0xBF]) && String::from_utf8_lossy(&b).contains("Müller 😀"));
+        // UTF-16 LE stays UTF-16 LE.
+        let b = write_table(&req("UTF-16 LE", rows)).unwrap();
+        assert_eq!(decode(&b).1, "UTF-16 LE");
+        assert!(decode(&b).0.contains("Müller;Köln €"));
+    }
+
+    #[test]
     fn line_endings_round_trip() {
         assert_eq!(detect_eol("a,b\n1,2\n"), "\n");
         assert_eq!(detect_eol("a,b\r\n1,2\r\n"), "\r\n");
         assert_eq!(detect_eol("a,b"), "\r\n");
-        let req = |eol: Option<&str>| WriteReq { format: "csv".into(), delimiter: Some(",".into()), bom: false, eol: eol.map(String::from),
+        let req = |eol: Option<&str>| WriteReq { format: "csv".into(), delimiter: Some(",".into()), bom: false, eol: eol.map(String::from), encoding: None,
             columns: vec![], numeric: vec![], rows: vec![vec![json!("a"), json!("b\nc")], vec![json!(1), json!(2)]] };
         assert_eq!(String::from_utf8(write_table(&req(Some("\n"))).unwrap()).unwrap(), "a,\"b\nc\"\n1,2\n");
         assert_eq!(String::from_utf8(write_table(&req(None)).unwrap()).unwrap(), "a,\"b\nc\"\r\n1,2\r\n");
@@ -500,12 +543,12 @@ mod tests {
     }
     #[test]
     fn writing() {
-        let req = WriteReq { format: "csv".into(), delimiter: Some(";".into()), bom: true, eol: None, columns: vec![], numeric: vec![],
+        let req = WriteReq { format: "csv".into(), delimiter: Some(";".into()), bom: true, eol: None, encoding: None, columns: vec![], numeric: vec![],
             rows: vec![vec![json!("Name"), json!("Preis")], vec![json!("Äpfel; rot"), json!("1,20")]] };
         let out = write_table(&req).unwrap();
         assert_eq!(&out[..3], &[0xEF, 0xBB, 0xBF]);
         assert_eq!(String::from_utf8(out[3..].to_vec()).unwrap(), "Name;Preis\r\n\"Äpfel; rot\";1,20\r\n");
-        let req = WriteReq { format: "json".into(), delimiter: None, bom: false, eol: None, columns: vec!["a".into(), "b".into()], numeric: vec![],
+        let req = WriteReq { format: "json".into(), delimiter: None, bom: false, eol: None, encoding: None, columns: vec!["a".into(), "b".into()], numeric: vec![],
             rows: vec![vec![json!(1), json!("x")]] };
         let v: Value = serde_json::from_slice(&write_table(&req).unwrap()).unwrap();
         assert_eq!(v, json!([{"a": 1, "b": "x"}]));

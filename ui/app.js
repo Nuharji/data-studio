@@ -1358,7 +1358,8 @@ function serialize(d, fmt, onlyVisible, keepRaw) {
     };
     const rows = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...idx.map(i => cols.map((_, c) => cell(i, c)))];
     // Saving in the file's own format keeps its line endings (LF files stay LF, e.g. for Git); exports use CRLF.
-    return tableWrite({format: 'csv', delimiter: delim, bom: fmt === 'csvSemi' || (keepRaw && !!d.bom), eol: keepRaw ? d.eol : null, rows});
+    return tableWrite({format: 'csv', delimiter: delim, bom: fmt === 'csvSemi' || (keepRaw && !!d.bom), eol: keepRaw ? d.eol : null,
+      encoding: keepRaw && fmt !== 'csvSemi' ? d.encoding : null, rows});
   }
   if (fmt === 'json' || fmt === 'jsonl') {
     const rows = idx.map(i => cols.map((c, ci) => { const v = typed(value(sh, i, ci), c); return v instanceof Date ? isoDate(v) : typeof v === 'number' && !Number.isFinite(v) ? null : v; }));
@@ -1434,7 +1435,11 @@ async function save() {
     const bytes = toBytes(await serialize(d, fmt, false, true));
     const r = await writeBytes(bytes, {path: d.path, name: d.name, filter: FORMAT_NAMES[d.format] || 'Data', ext: extOf(d.name)});
     if (!r) return;
+    // A Windows-1252 file is saved in Windows-1252; characters it can't hold make it UTF-8 with BOM (Rust: encode_csv).
+    const fellBack = d.encoding === 'Windows-1252' && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+    if (fellBack) { d.encoding = 'UTF-8 (BOM)'; d.bom = true; }
     markSaved(d, r, bytes.length);
+    if (fellBack) toast(t('toast.savedUtf8', {name: d.name}));
   } catch (e) { toast(t('toast.saveFail', {e: e.message || e})); }
 }
 function markSaved(d, r, size) {

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.12.2 — 2026-10-11
+- Fixed: CSV files in Windows-1252 (e.g. saved by German Excel as “CSV (Trennzeichen-getrennt)”) were saved back as UTF-8 without BOM, so Excel then showed “MÃ¼ller” instead of “Müller”. CSV and TSV files now keep their encoding (Windows-1252, UTF-16 or UTF-8). If a character doesn’t fit Windows-1252, the file is saved as UTF-8 with BOM, which Excel also reads correctly, and you get a note.
+
 ## 1.12.1 — 2026-10-11
 - Fixed: saving a CSV or TSV file changed its line endings to Windows style (CRLF), so in Git every line showed as changed. Files keep their own line endings now (LF stays LF); exports to a new file still use CRLF.
 
