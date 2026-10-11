@@ -26,7 +26,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
 
 /* ================= Settings & state ================= */
 const THEMES = ['dark', 'light', 'github', 'github-dark'];
-const DEF = {autoHide: false, lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
+const DEF = {keys: {}, autoHide: false, lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, booted = false, docSeq = 0;
 const cur = () => docs[active];
 const sheet = () => cur() && cur().sheets[cur().si];
@@ -1592,7 +1592,12 @@ const MENUS = [
   ['help', [['functions', 'Shift+F3'], ['shortcuts'], '-', ['about']]]
 ];
 const KEYMAP = {};
-MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
+/* Built from the menu entries — again whenever a shortcut is changed in Settings (shortcuts.js). */
+function buildKeymap() {
+  for (const m of [KEYMAP]) for (const k in m) delete m[k];
+  MENUS.forEach(([, items]) => items.forEach(it => { if (Array.isArray(it) && it[1] && !it[3]) KEYMAP[it[1]] = it[0]; }));
+}
+buildKeymap();
 const NO_DOC = new Set(['toggleAutoHide', 'openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
   'themeGithubDark', 'shortcuts', 'functions', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
 const allowed = act => act.startsWith('fmt') ? canFormat() : !!cur() || NO_DOC.has(act);
@@ -1670,6 +1675,7 @@ const EDIT_ACTS = new Set(['undo', 'redo', 'insertRow', 'deleteRows', 'insertCol
 $('#fcPick').addEventListener('change', e => applyFormat({fc: e.target.value.toUpperCase()}));
 $('#bgPick').addEventListener('change', e => applyFormat({bg: e.target.value.toUpperCase()}));
 window.addEventListener('keydown', e => {
+  if (window.Shortcuts && Shortcuts.recording) return;   // Settings → Shortcuts is taking a key
   if (e.key === 'Escape') {
     if ($('#modal').classList.contains('show')) { e.preventDefault(); closeModal(); }
     else if (menuOpen) closeMenus();
@@ -1719,6 +1725,7 @@ function renderSettings() {
   const mock = th => `<div class="tc-mock" data-theme="${th}"><div class="tc-bar"><i></i><i></i><i></i><b></b></div><div class="tc-body"><div class="tc-rail"></div>
     <div class="tc-grid">${Array.from({length: 28}, (_, i) => `<i class="${i < 4 ? 'h' : ''}"></i>`).join('')}</div><div class="tc-dock"></div></div></div>`;
   const body = {
+    keys: `<div id="keysBox"></div>`,
     general: `<h3>${t('set.language')}</h3><p class="hint">${t('set.languageHint')}</p>
       <select class="wide-sel" data-sel="lang">${opt('auto', t('a.langAuto'), settings.lang)}${opt('en', 'English', settings.lang)}${opt('de', 'Deutsch', settings.lang)}</select>
       <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('autoHide', t('set.autoHide'))}${sw('reopen', t('set.reopen'))}`,
@@ -1730,8 +1737,9 @@ function renderSettings() {
       <h3>${t('set.spell')}</h3><p class="hint">${t('set.spellHint')}</p><select class="wide-sel" data-sel="spell">${opt('auto', t('set.spellAuto'), settings.spell)}${opt('de', 'Deutsch', settings.spell)}${opt('en', 'English', settings.spell)}${opt('off', t('set.spellOff'), settings.spell)}</select>`
   };
   $('#modalTitle').textContent = t('set.title');
-  $('#modalBody').innerHTML = `<div class="prefs"><nav>${['general', 'appearance', 'table'].map(k =>
+  $('#modalBody').innerHTML = `<div class="prefs"><nav>${['general', 'appearance', 'table', 'keys'].map(k =>
     `<button data-sec="${k}" class="${k === prefsSection ? 'active' : ''}">${esc(t('set.' + k))}</button>`).join('')}</nav><section>${body[prefsSection]}</section></div>`;
+  if (prefsSection === 'keys') mountKeys();
   $('#modalFoot').innerHTML = `<button class="btn-sm" data-pref="reset">${esc(t('set.reset'))}</button><span class="flex"></span>
     <button class="btn-sm primary" data-pref="done">${esc(t('set.done'))}</button>`;
 }
@@ -1761,8 +1769,19 @@ function applyLanguage() {
 }
 let lastView = null;
 let lastSpell = null;
+let appliedKeys = '{}';
+/* Settings → Shortcuts: change a key by pressing it (shortcuts.js). */
+function mountKeys() {
+  Shortcuts.editor($('#keysBox'), {MENUS, keys: settings.keys || {}, t, fmtKey, comboOf, label: a => t('a.' + a),
+    onChange: keys => { settings.keys = keys; applySettings(); }});
+}
 function applySettings() {
   if (window.AutoHide) AutoHide.set(settings.autoHide);
+  if (window.Shortcuts && JSON.stringify(settings.keys || {}) !== appliedKeys) {
+    appliedKeys = JSON.stringify(settings.keys || {});
+    Shortcuts.apply(MENUS, settings.keys || {}); buildKeymap();
+    if (typeof buildToolbars === 'function' && document.querySelector('#menus')) buildToolbars();
+  }
   if (settings.spell !== lastSpell) { lastSpell = settings.spell; for (const d of docs) for (const s of d.sheets) if (s.eid) scheduleSpell(s, 50); }
   if (!THEMES.includes(settings.theme)) settings.theme = 'dark';
   const nl = effectiveLang();
