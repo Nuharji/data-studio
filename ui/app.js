@@ -300,7 +300,7 @@ async function parseFile(bytes, name, job = null, path = null) {
   const fromRust = v => v && typeof v === 'object' && '$date' in v ? XFormat.fromSerial(v.$date) : v;
   const json = m.format === 'json' || m.format === 'jsonl';
   const sheets = m.sheets.map(s => makeSheet(s.name || base, s.rows.map(r => r.map(fromRust)), true, !json));
-  return {format: m.format, sheets, encoding: m.encoding, bom: m.bom, delimiter: m.delimiter, size: m.size};
+  return {format: m.format, sheets, encoding: m.encoding, bom: m.bom, delimiter: m.delimiter, eol: m.eol, size: m.size};
 }
 
 /* ================= File access (native or browser) ================= */
@@ -1357,7 +1357,8 @@ function serialize(d, fmt, onlyVisible, keepRaw) {
       return typeof v === 'number' ? String(+v.toPrecision(15)) : rawText(v);
     };
     const rows = [...(sh.header || !keepRaw ? [cols.map(c => c.name)] : []), ...idx.map(i => cols.map((_, c) => cell(i, c)))];
-    return tableWrite({format: 'csv', delimiter: delim, bom: fmt === 'csvSemi' || (keepRaw && !!d.bom), rows});
+    // Saving in the file's own format keeps its line endings (LF files stay LF, e.g. for Git); exports use CRLF.
+    return tableWrite({format: 'csv', delimiter: delim, bom: fmt === 'csvSemi' || (keepRaw && !!d.bom), eol: keepRaw ? d.eol : null, rows});
   }
   if (fmt === 'json' || fmt === 'jsonl') {
     const rows = idx.map(i => cols.map((c, ci) => { const v = typed(value(sh, i, ci), c); return v instanceof Date ? isoDate(v) : typeof v === 'number' && !Number.isFinite(v) ? null : v; }));

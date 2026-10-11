@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.12.1 — 2026-10-11
+- Fixed: saving a CSV or TSV file changed its line endings to Windows style (CRLF), so in Git every line showed as changed. Files keep their own line endings now (LF stays LF); exports to a new file still use CRLF.
+
 ## 1.12.0 — 2026-10-11
 - Zoom for the table (50–200 %): text, row heights and column widths grow and shrink together. Ctrl + mouse wheel, Ctrl++ / Ctrl+0, View → Zoom In / Zoom Out / Actual Size, − 100 % + in the status bar, and a slider in Settings → Table. The zoom is remembered; column widths saved to Excel files are not changed by it.
 

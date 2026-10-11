@@ -37,6 +37,14 @@ fn csv_reader(text: &str, delim: u8) -> csv::Reader<&[u8]> {
 }
 
 /// The separator that splits the first lines into the most consistent number of fields (like spreadsheet apps guess it).
+/// The file's line ending: "\n" when its first line ends with a bare LF, otherwise "\r\n" (also for one-line files).
+pub fn detect_eol(text: &str) -> &'static str {
+    match text.find('\n') {
+        Some(i) if i == 0 || text.as_bytes()[i - 1] != b'\r' => "\n",
+        _ => "\r\n",
+    }
+}
+
 pub fn detect_delimiter(text: &str) -> u8 {
     let sample: String = text.lines().take(60).collect::<Vec<_>>().join("\n");
     let mut best = (b',', 0.0f64);
@@ -353,7 +361,8 @@ pub async fn table_read(app: tauri::AppHandle, request: Request<'_>) -> Result<V
         if let Some(id) = id { use tauri::Emitter; let _ = app.emit("load-progress", json!({"id": id, "phase": "parse", "done": done, "total": total})); }
     });
     if let Some(id) = id { use tauri::Emitter; let _ = app.emit("load-progress", json!({"id": id, "phase": "parse", "done": total, "total": total})); }
-    Ok(json!({"format": format, "encoding": encoding, "bom": bom, "delimiter": (delim as char).to_string(), "sheets": sheet(rows), "size": size}))
+    let eol = detect_eol(&text);
+    Ok(json!({"format": format, "encoding": encoding, "bom": bom, "delimiter": (delim as char).to_string(), "eol": eol, "sheets": sheet(rows), "size": size}))
 }
 
 #[derive(Deserialize)]
@@ -364,6 +373,9 @@ pub struct WriteReq {
     delimiter: Option<String>,
     #[serde(default)]
     bom: bool,
+    /// For csv: "\n" keeps a file's LF line endings; anything else writes CRLF (the CSV standard).
+    #[serde(default)]
+    eol: Option<String>,
     /// For json/jsonl/md: the column names; `rows` then hold only data.
     #[serde(default)]
     columns: Vec<String>,
@@ -386,7 +398,8 @@ pub fn write_table(req: &WriteReq) -> Result<Vec<u8>, String> {
     match req.format.as_str() {
         "csv" => {
             let delim = req.delimiter.as_deref().and_then(|d| d.bytes().next()).unwrap_or(b',');
-            let mut w = csv::WriterBuilder::new().delimiter(delim).terminator(csv::Terminator::CRLF).flexible(true).from_writer(Vec::new());
+            let terminator = if req.eol.as_deref() == Some("\n") { csv::Terminator::Any(b'\n') } else { csv::Terminator::CRLF };
+            let mut w = csv::WriterBuilder::new().delimiter(delim).terminator(terminator).flexible(true).from_writer(Vec::new());
             for row in &req.rows {
                 w.write_record(row.iter().map(text_of)).map_err(|e| e.to_string())?;
             }
@@ -445,6 +458,17 @@ mod tests {
         assert_eq!(from_open_formula("of:=IF([.A1]>1;\"a;b\";0.5)"), "IF(A1>1,\"a;b\",0.5)");
     }
     #[test]
+    fn line_endings_round_trip() {
+        assert_eq!(detect_eol("a,b\n1,2\n"), "\n");
+        assert_eq!(detect_eol("a,b\r\n1,2\r\n"), "\r\n");
+        assert_eq!(detect_eol("a,b"), "\r\n");
+        let req = |eol: Option<&str>| WriteReq { format: "csv".into(), delimiter: Some(",".into()), bom: false, eol: eol.map(String::from),
+            columns: vec![], numeric: vec![], rows: vec![vec![json!("a"), json!("b\nc")], vec![json!(1), json!(2)]] };
+        assert_eq!(String::from_utf8(write_table(&req(Some("\n"))).unwrap()).unwrap(), "a,\"b\nc\"\n1,2\n");
+        assert_eq!(String::from_utf8(write_table(&req(None)).unwrap()).unwrap(), "a,\"b\nc\"\r\n1,2\r\n");
+    }
+
+    #[test]
     fn delimiters() {
         assert_eq!(detect_delimiter("a;b;c\n1;2,5;3\n4;5;6"), b';');
         assert_eq!(detect_delimiter("a,b\n1,2\n3,4"), b',');
@@ -476,12 +500,12 @@ mod tests {
     }
     #[test]
     fn writing() {
-        let req = WriteReq { format: "csv".into(), delimiter: Some(";".into()), bom: true, columns: vec![], numeric: vec![],
+        let req = WriteReq { format: "csv".into(), delimiter: Some(";".into()), bom: true, eol: None, columns: vec![], numeric: vec![],
             rows: vec![vec![json!("Name"), json!("Preis")], vec![json!("Äpfel; rot"), json!("1,20")]] };
         let out = write_table(&req).unwrap();
         assert_eq!(&out[..3], &[0xEF, 0xBB, 0xBF]);
         assert_eq!(String::from_utf8(out[3..].to_vec()).unwrap(), "Name;Preis\r\n\"Äpfel; rot\";1,20\r\n");
-        let req = WriteReq { format: "json".into(), delimiter: None, bom: false, columns: vec!["a".into(), "b".into()], numeric: vec![],
+        let req = WriteReq { format: "json".into(), delimiter: None, bom: false, eol: None, columns: vec!["a".into(), "b".into()], numeric: vec![],
             rows: vec![vec![json!(1), json!("x")]] };
         let v: Value = serde_json::from_slice(&write_table(&req).unwrap()).unwrap();
         assert_eq!(v, json!([{"a": 1, "b": "x"}]));
