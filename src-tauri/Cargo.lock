@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "data-studio"
-version = "1.12.2"
+version = "1.13.0"
 dependencies = [
  "calamine",
  "csv",

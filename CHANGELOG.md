@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13.0 — 2026-10-15
+- New: Function plots (Chart → Function plot): up to 6 terms like `x^2 - 2x - 3`, `sin(x)`, `2,5·e^(-x)`, `|x|`, with implicit multiplication and decimal comma; zeros, turning points (maxima / minima) and the y-intercept are listed for each graph. Poles (1/x, tan) are drawn as gaps. Calculated in Rust (plot.rs).
+- New: Trend line for point charts — linear regression with its equation and R².
+- New: Pivot tables (Pivot panel): rows × columns of one or two columns, summarizing a number column (sum, average, minimum, maximum, count) or counting rows, with totals; “Open as new table” turns the result into a table to save or chart. Search and filters apply.
+- Column statistics: standard deviation, variance, quartiles and range.
+
 ## 1.12.2 — 2026-10-11
 - Fixed: CSV files in Windows-1252 (e.g. saved by German Excel as “CSV (Trennzeichen-getrennt)”) were saved back as UTF-8 without BOM, so Excel then showed “MÃ¼ller” instead of “Müller”. CSV and TSV files now keep their encoding (Windows-1252, UTF-16 or UTF-8). If a character doesn’t fit Windows-1252, the file is saved as UTF-8 with BOM, which Excel also reads correctly, and you get a note.
 

@@ -1192,7 +1192,7 @@ function clearView() {
 }
 
 /* ================= Panels: column statistics, properties, chart settings ================= */
-function buildPanels() { buildColPanel(); buildProps(); buildChartPanel(); }
+function buildPanels() { buildColPanel(); buildProps(); buildChartPanel(); buildPivotPanel(); }
 /* The numbers come from Rust (stats.rs), worked out on the rows the table shows; only the newest answer is drawn. */
 let colSeq = 0;
 async function buildColPanel() {
@@ -1211,7 +1211,8 @@ async function buildColPanel() {
   if (s.number) {
     const n = s.number;
     h += `<div class="sect">${esc(t('type.number'))}</div>${kv('ui.min', num(n.min))}${kv('ui.max', num(n.max))}
-      ${kv('ui.sum', num(n.sum))}${kv('ui.mean', num(n.mean))}${kv('ui.median', num(n.median))}`;
+      ${kv('ui.sum', num(n.sum))}${kv('ui.mean', num(n.mean))}${kv('ui.median', num(n.median))}
+      ${kv('ui.std', num(n.std))}${kv('ui.var', num(n.var))}${kv('ui.q1', num(n.q1))}${kv('ui.q3', num(n.q3))}${kv('ui.range', num(n.max - n.min))}`;
   } else if (s.dates) {
     const f = serial => XFormat.fromSerial(serial).toLocaleString(lang, {dateStyle: 'medium'});
     h += `<div class="sect">${esc(t('type.date'))}</div>${kv('ui.earliest', f(s.dates[0]))}${kv('ui.latest', f(s.dates[1]))}`;
@@ -1247,7 +1248,7 @@ function chartCfg(sh) {
     let x = sh.cols.findIndex(c => c.type === 'text' || c.type === 'date');
     if (x < 0) x = firstNum === 0 && sh.cols.length > 1 ? 1 : 0;
     const y = sh.cols.findIndex((c, i) => c.type === 'number' && i !== x);
-    sh.chart = {type: 'bar', x, ys: y >= 0 ? [y] : [], agg: 'sum', limit: 30};
+    sh.chart = {type: 'bar', x, ys: y >= 0 ? [y] : [], agg: 'sum', limit: 30, trend: false, fx: 'x^2 - 2x - 3', from: -5, to: 5, deg: false};
   }
   return sh.chart;
 }
@@ -1258,18 +1259,32 @@ function buildChartPanel() {
   const cfg = chartCfg(sh);
   const opt = (v, l, cv) => `<option value="${v}"${String(v) === String(cv) ? ' selected' : ''}>${esc(l)}</option>`;
   const nums = sh.cols.map((c, i) => [c, i]).filter(([c]) => c.type === 'number');
+  const typeSel = `<div class="field"><label>${esc(t('ui.chartType'))}</label><select data-cfg="type">${['bar', 'line', 'pie', 'scatter', 'function'].map(v => opt(v, t('chart.' + v), cfg.type)).join('')}</select></div>`;
+  // Function plot: terms instead of columns (plot.rs samples them, finds zeros and turning points).
+  if (cfg.type === 'function') {
+    box.innerHTML = `${typeSel}
+      <div class="field"><label>${esc(t('ui.fx'))}</label><textarea class="fx-terms" data-cfg="fx" rows="3" spellcheck="false">${esc(cfg.fx || '')}</textarea>
+        <div class="hint-s">${esc(t('ui.fxHint'))}</div></div>
+      <div class="field fx-range"><label>${esc(t('ui.xRange'))}</label><input type="number" data-cfg="from" value="${cfg.from}" step="any"><span>…</span><input type="number" data-cfg="to" value="${cfg.to}" step="any"></div>
+      <label class="switch"><input type="checkbox" data-cfgb="deg"${cfg.deg ? ' checked' : ''}><span></span>${esc(t('ui.deg'))}</label>
+      <div id="plotInfo"></div>`;
+    return;
+  }
   box.innerHTML = `
-    <div class="field"><label>${esc(t('ui.chartType'))}</label><select data-cfg="type">${['bar', 'line', 'pie', 'scatter'].map(v => opt(v, t('chart.' + v), cfg.type)).join('')}</select></div>
+    ${typeSel}
     <div class="field"><label>${esc(t('ui.xCol'))}</label><select data-cfg="x">${sh.cols.map((c, i) => opt(i, c.name, cfg.x)).join('')}</select></div>
     <div class="field"><label>${esc(t('ui.yCols'))}</label><div class="checks">${nums.length ? nums.map(([c, i]) =>
       `<label><input type="checkbox" data-y="${i}"${cfg.ys.includes(i) ? ' checked' : ''}>${esc(c.name)}</label>`).join('') : `<span class="empty" style="padding:4px">—</span>`}</div></div>
     <div class="field"><label>${esc(t('ui.agg'))}</label><select data-cfg="agg">${['none', 'sum', 'avg', 'count'].map(v => opt(v, t('agg.' + v), cfg.agg)).join('')}</select></div>
     <div class="field"><label>${esc(t('ui.limit'))}</label><select data-cfg="limit">${[10, 20, 30, 50, 100, 500].map(v => opt(v, String(v), cfg.limit)).join('')}</select></div>
+    ${cfg.type === 'scatter' ? `<label class="switch"><input type="checkbox" data-cfgb="trend"${cfg.trend ? ' checked' : ''}><span></span>${esc(t('ui.trend'))}</label>` : ''}
     <button class="btn-sm" data-act="viewSplit" style="margin-top:6px">${esc(t('a.viewSplit'))}</button>`;
 }
 $('#chartPanel').addEventListener('change', e => {
   const sh = sheet(), cfg = chartCfg(sh), k = e.target.dataset.cfg;
-  if (k) cfg[k] = k === 'x' || k === 'limit' ? +e.target.value : e.target.value;
+  if (k) cfg[k] = ['x', 'limit', 'from', 'to'].includes(k) ? +e.target.value : e.target.value;
+  if (e.target.dataset.cfgb) cfg[e.target.dataset.cfgb] = e.target.checked;
+  if (k === 'type') buildChartPanel();
   if (e.target.dataset.y != null) {
     const y = +e.target.dataset.y;
     cfg.ys = e.target.checked ? [...new Set([...cfg.ys, y])] : cfg.ys.filter(v => v !== y);
@@ -1286,6 +1301,7 @@ async function renderChart() {
   const drop = () => { if (chart) { chart.destroy(); chart = null; } };
   if (!sh || settings.view === 'table' || !window.Chart || !invoke || !sh.eid) return drop();
   const cfg = chartCfg(sh);
+  if (cfg.type === 'function') return renderPlot(sh, cfg, my, drop);
   await sh.engineReady;
   const res = await invoke('engine_chart', {id: sh.eid, cfg});
   if (my !== chartSeq || sheet() !== sh) return;
@@ -1308,6 +1324,11 @@ async function renderChart() {
       : {backgroundColor: cfg.type === 'line' ? c + '33' : c + 'cc', borderColor: c, borderWidth: cfg.type === 'line' ? 2 : 0,
         pointRadius: cfg.type === 'scatter' ? 3 : 2, fill: cfg.type === 'line' && data.datasets.length === 1, tension: 0.25, borderRadius: 3});
   });
+  if (res.trend) {
+    const tr = res.trend, f = x => tr.a * x + tr.b, dateX = xcol.type === 'date', X = v => dateX ? XFormat.fromSerial(v).getTime() : v;
+    data.datasets.push({type: 'line', label: t('ui.trendLabel', {eq: `y = ${num(round4(tr.a))}·x ${tr.b < 0 ? '−' : '+'} ${num(round4(Math.abs(tr.b)))}`, r2: num(round4(tr.r2))}),
+      data: [{x: X(tr.x0), y: f(tr.x0)}, {x: X(tr.x1), y: f(tr.x1)}], borderColor: PALETTE[3], borderDash: [6, 4], borderWidth: 2, pointRadius: 0, fill: false});
+  }
   const scales = pie ? {} : {
     x: {type: data.scatter ? 'linear' : 'category', ticks: {color: text, maxRotation: 50, autoSkip: true}, grid: {color: line}, title: {display: true, text: xName, color: text}},
     y: {ticks: {color: text}, grid: {color: line}, beginAtZero: cfg.type === 'bar'}
@@ -1315,6 +1336,41 @@ async function renderChart() {
   chart = new Chart($('#chart'), {type: data.scatter ? 'scatter' : cfg.type, data: {labels: data.labels, datasets: data.datasets},
     options: {responsive: true, maintainAspectRatio: false, animation: {duration: 250}, scales,
       plugins: {legend: {display: pie || data.datasets.length > 1, labels: {color: text}}, tooltip: {mode: pie ? 'nearest' : 'index', intersect: false}}}});
+}
+const round4 = v => Math.round(v * 1e4) / 1e4;
+/* Function plot: the terms are sampled in Rust (plot.rs); zeros, turning points and f(0) are listed below the settings. */
+async function renderPlot(sh, cfg, my, drop) {
+  const terms = String(cfg.fx || '').split('\n').map(s => s.trim()).filter(Boolean).slice(0, 6);
+  const from = Number.isFinite(cfg.from) ? cfg.from : -5, to = Number.isFinite(cfg.to) && cfg.to !== from ? cfg.to : from + 10;
+  const plots = await invoke('plot_functions', {exprs: terms, from, to, n: 600, deg: !!cfg.deg});
+  if (my !== chartSeq || sheet() !== sh) return;
+  drop();
+  const empty = $('#chartEmpty'), ok = plots.filter(p => !p.error);
+  $('#chartTitle').textContent = terms.map((s, i) => `${String.fromCharCode(102 + i)}(x) = ${s.replace(/^.*=\s*/, '')}`).join(' · ');
+  empty.textContent = ok.length ? '' : (plots[0] && plots[0].error ? t('ui.fxError', {e: plots[0].error}) : t('ui.fxHint'));
+  empty.hidden = !!ok.length;
+  const info = $('#plotInfo');
+  if (info) info.innerHTML = plots.map((p, i) => {
+    const name = String.fromCharCode(102 + i) + '(x)', c = PALETTE[i % PALETTE.length];
+    if (p.error) return `<div class="plot-res"><b style="color:${c}">${name}</b> <span class="err">${esc(t('ui.fxError', {e: p.error}))}</span></div>`;
+    const pt = (x, y) => `(${num(x)} | ${num(y)})`;
+    return `<div class="plot-res"><b style="color:${c}">${name}</b>
+      <div class="kv"><span>${esc(t('ui.zeros'))}</span><b>${p.zeros.length ? p.zeros.map(z => num(z)).join('; ') : '—'}</b></div>
+      ${p.extrema.map(([x, y, k]) => `<div class="kv"><span>${esc(t(k === 'max' ? 'plot.max' : 'plot.min'))}</span><b>${pt(x, y)}</b></div>`).join('')}
+      <div class="kv"><span>${esc(t('ui.y0'))}</span><b>${p.y0 == null ? '—' : num(p.y0)}</b></div></div>`;
+  }).join('');
+  if (!ok.length) return;
+  const text = cssVar('--text'), line = cssVar('--grid-line'), axis = cssVar('--dim');
+  const datasets = plots.map((p, i) => p.error ? null : {label: String.fromCharCode(102 + i) + '(x) = ' + terms[i].replace(/^.*=\s*/, ''),
+    data: p.points.map(([x, y]) => ({x, y})), showLine: true, spanGaps: false, pointRadius: 0, borderWidth: 2,
+    borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length]}).filter(Boolean);
+  // The x and y axes through the origin are drawn stronger than the grid.
+  const grid = {color: c => c.tick && c.tick.value === 0 ? axis : line, lineWidth: c => c.tick && c.tick.value === 0 ? 1.5 : 1};
+  chart = new Chart($('#chart'), {type: 'scatter', data: {datasets},
+    options: {responsive: true, maintainAspectRatio: false, animation: {duration: 200}, parsing: false,
+      scales: {x: {type: 'linear', min: from, max: to, ticks: {color: text}, grid, title: {display: true, text: 'x', color: text}},
+        y: {ticks: {color: text}, grid, title: {display: true, text: 'y', color: text}}},
+      plugins: {legend: {display: true, labels: {color: text}}, tooltip: {callbacks: {label: c => `${c.dataset.label.split(' =')[0]}: (${num(round4(c.parsed.x))} | ${num(round4(c.parsed.y))})`}}}}});
 }
 async function exportChart() {
   if (!chart) return toast(t('ui.chartNeedNumber'));
@@ -1325,6 +1381,69 @@ async function exportChart() {
   const name = cur().name.replace(/\.[^.]+$/, '') + (lang === 'de' ? '-Diagramm.png' : '-chart.png');
   const r = await writeBytes(new Uint8Array(await blob.arrayBuffer()), {name, filter: 'PNG', ext: 'png'}).catch(e => toast(t('toast.saveFail', {e})));
   if (r) toast(t('toast.exported', {name: r.path || r.name}));
+}
+
+/* ================= Pivot tables ================= */
+/* Rows × columns of one or two columns' values, summarizing a number column (sum, average, min, max) or counting rows.
+   Worked out in Rust (stats.rs pivot) on the rows the table shows (search and filters apply). */
+let pivotSeq = 0, lastPivot = null;
+function pivotCfg(sh) {
+  if (!sh.pivot) {
+    const text = sh.cols.findIndex(c => c.type === 'text'), n = sh.cols.findIndex(c => c.type === 'number');
+    sh.pivot = {rows: Math.max(0, text), cols: null, val: n >= 0 ? n : null, agg: n >= 0 ? 'sum' : 'count'};
+  }
+  return sh.pivot;
+}
+function buildPivotPanel() {
+  const box = $('#pivotPanel'), sh = sheet();
+  if (!sh) { box.innerHTML = ''; $('#pivotOut').innerHTML = ''; return; }
+  if (settings.dockTab !== 'pivot') return;
+  const cfg = pivotCfg(sh), opt = (v, l, cv) => `<option value="${v}"${String(v) === String(cv) ? ' selected' : ''}>${esc(l)}</option>`;
+  const all = sh.cols.map((c, i) => opt(i, c.name, cfg.rows)).join('');
+  box.innerHTML = `
+    <div class="field"><label>${esc(t('pivot.rows'))}</label><select data-pv="rows">${all}</select></div>
+    <div class="field"><label>${esc(t('pivot.cols'))}</label><select data-pv="cols">${opt('', t('pivot.none'), cfg.cols ?? '')}${sh.cols.map((c, i) => opt(i, c.name, cfg.cols ?? '')).join('')}</select></div>
+    <div class="field"><label>${esc(t('pivot.val'))}</label><select data-pv="val">${opt('', t('pivot.count'), cfg.val ?? '')}${sh.cols.map((c, i) => [c, i]).filter(([c]) => c.type === 'number').map(([c, i]) => opt(i, c.name, cfg.val ?? '')).join('')}</select></div>
+    ${cfg.val == null ? '' : `<div class="field"><label>${esc(t('ui.agg'))}</label><select data-pv="agg">${['sum', 'avg', 'min', 'max', 'count'].map(v => opt(v, t('agg.' + v), cfg.agg)).join('')}</select></div>`}
+    <button class="btn-sm" id="pivotToTable">${esc(t('pivot.toTable'))}</button>`;
+  renderPivot();
+}
+$('#pivotPanel').addEventListener('change', e => {
+  const k = e.target.dataset.pv; if (!k) return;
+  const cfg = pivotCfg(sheet()), v = e.target.value;
+  cfg[k] = k === 'agg' ? v : v === '' ? null : +v;
+  buildPivotPanel();
+});
+$('#pivotPanel').addEventListener('click', e => { if (e.target.id === 'pivotToTable') pivotToTable(); });
+async function renderPivot() {
+  const sh = sheet(), out = $('#pivotOut'), my = ++pivotSeq;
+  if (!sh || !invoke || !sh.eid) return;
+  await sh.engineReady;
+  const p = await invoke('engine_pivot', {id: sh.eid, cfg: pivotCfg(sh)});
+  if (my !== pivotSeq || sheet() !== sh) return;
+  lastPivot = p;
+  if (!p || !p.row_keys.length) { out.innerHTML = `<div class="empty">${esc(t('pivot.empty'))}</div>`; return; }
+  const cfg = pivotCfg(sh), key = k => k === '' ? `<span class="blank">${esc(t('pivot.blank'))}</span>` : esc(k), val = v => v == null ? '' : num(round4(v));
+  const colHead = cfg.cols == null ? [esc(cfg.val == null ? t('pivot.count') : `${t('agg.' + cfg.agg)} ${sh.cols[cfg.val].name}`)] : p.col_keys.map(key);
+  let h = `<div class="pv-wrap"><table class="pv-tbl"><tr><th>${esc(sh.cols[cfg.rows].name)}</th>${colHead.map(c => `<th>${c}</th>`).join('')}${cfg.cols == null ? '' : `<th>${esc(t('pivot.total'))}</th>`}</tr>`;
+  p.row_keys.forEach((k, i) => {
+    h += `<tr><td>${key(k)}</td>${p.cells[i].map(v => `<td>${val(v)}</td>`).join('')}${cfg.cols == null ? '' : `<td class="tot">${val(p.row_totals[i])}</td>`}</tr>`;
+  });
+  h += `<tr><td class="tot">${esc(t('pivot.total'))}</td>${(cfg.cols == null ? [p.total] : p.col_totals).map(v => `<td class="tot">${val(v)}</td>`).join('')}${cfg.cols == null ? '' : `<td class="tot">${val(p.total)}</td>`}</tr></table></div>`;
+  if (p.cut) h += `<p class="hint-s">${esc(t('pivot.cut'))}</p>`;
+  out.innerHTML = h;
+}
+/* The pivot table as a new document (a tab), ready to save or chart. */
+function pivotToTable() {
+  const sh = sheet(), p = lastPivot; if (!p || !sh) return;
+  const cfg = pivotCfg(sh), label = k => k === '' ? t('pivot.blank') : k;
+  const head = [sh.cols[cfg.rows].name, ...(cfg.cols == null ? [cfg.val == null ? t('pivot.count') : `${t('agg.' + cfg.agg)} ${sh.cols[cfg.val].name}`] : [...p.col_keys.map(label), t('pivot.total')])];
+  const rows = p.row_keys.map((k, i) => [label(k), ...p.cells[i].map(v => v ?? ''), ...(cfg.cols == null ? [] : [p.row_totals[i] ?? ''])]);
+  rows.push([t('pivot.total'), ...(cfg.cols == null ? [p.total ?? ''] : [...p.col_totals.map(v => v ?? ''), p.total ?? ''])]);
+  const nsh = makeSheet('Pivot', [head, ...rows]);
+  docs.push({id: ++docSeq, name: `Pivot-${untitledN++}.xlsx`, path: null, size: 0, format: 'xlsx', delimiter: '', bom: false, encoding: '',
+    sheets: [nsh], si: 0, dirty: true, history: [], future: [], cleanDepth: -1, isNew: true});
+  activate(docs.length - 1);
 }
 
 /* ================= Saving & exporting ================= */

@@ -252,6 +252,21 @@ body.compact .grid{--rh:22px}
 .bar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar b{font-weight:500;color:var(--dim);font-variant-numeric:tabular-nums}
 .bar i{grid-column:1/-1;display:block;height:4px;border-radius:2px;background:var(--accent2)}
+/* Function plots, pivot tables */
+.fx-terms{width:100%;resize:vertical;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius);padding:6px 8px;font:13px/1.5 Consolas,"Cascadia Code",monospace;outline:0}
+.fx-terms:focus{border-color:var(--accent)}
+.hint-s{color:var(--dim);font-size:11px;margin-top:4px;line-height:1.5}
+.fx-range{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.fx-range>label{width:100%}
+.fx-range input{width:90px;height:26px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius);padding:0 6px;font:inherit}
+.plot-res{border-top:1px solid var(--border);padding:8px 0 4px;margin-top:6px}.plot-res .err{color:var(--danger)}
+.pv-wrap{overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:var(--radius);margin-top:10px}
+.pv-tbl{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%}
+.pv-tbl th,.pv-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap;text-align:right}
+.pv-tbl th{position:sticky;top:0;background:var(--pane-head,var(--chrome));color:var(--strong);font-weight:600}
+.pv-tbl td:first-child,.pv-tbl th:first-child{text-align:left;position:sticky;left:0;background:var(--panel)}
+.pv-tbl th:first-child{z-index:1;background:var(--pane-head,var(--chrome))}
+.pv-tbl .tot{font-weight:600;color:var(--strong)}
+.pv-tbl .blank{color:var(--dim);font-style:italic}
 .field{margin:10px 0}.field>label{display:block;color:var(--dim);margin-bottom:5px}
 .field select{width:100%}
 .checks{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto;border:1px solid var(--input-border);border-radius:var(--radius);padding:6px 8px;background:var(--input-bg)}
@@ -376,11 +391,13 @@ body.compact .grid{--rh:22px}
     <div class="dock-tabs" id="dockTabs">
       <button data-tab="column" data-i18n="ui.column"></button>
       <button data-tab="chart" data-i18n="ui.chart"></button>
+      <button data-tab="pivot" data-i18n="ui.pivot"></button>
       <button data-tab="props" data-i18n="ui.properties"></button>
     </div>
     <div class="dock-body" id="dockBody">
       <div class="dpanel" data-panel="column"><div id="colPanel"></div></div>
       <div class="dpanel" data-panel="chart"><div id="chartPanel"></div></div>
+      <div class="dpanel" data-panel="pivot"><div id="pivotPanel"></div><div id="pivotOut"></div></div>
       <div class="dpanel" data-panel="props"><div id="props"></div></div>
     </div>
   </aside>

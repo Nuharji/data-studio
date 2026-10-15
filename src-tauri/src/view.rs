@@ -225,7 +225,7 @@ fn fold(s: &str) -> String {
 }
 
 /// Natural order: "file2" before "file10". Expects already folded text (see `fold`).
-fn natural(a: &str, b: &str) -> Ordering {
+pub(crate) fn natural(a: &str, b: &str) -> Ordering {
     let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
     loop {
         match (x.peek().copied(), y.peek().copied()) {

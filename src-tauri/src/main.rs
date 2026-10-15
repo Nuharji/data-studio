@@ -4,6 +4,7 @@
 mod engine;
 mod formula;
 mod functions;
+mod plot;
 mod spell;
 mod stats;
 mod table;
@@ -295,6 +296,8 @@ fn main() {
             engine::engine_update,
             stats::engine_col_stats,
             stats::engine_chart,
+            stats::engine_pivot,
+            plot::plot_functions,
             stats::engine_spell,
             spell::spell_check,
             spell::spell_suggest,
