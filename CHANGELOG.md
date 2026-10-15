@@ -5,6 +5,7 @@
 - New: Trend line for point charts — linear regression with its equation and R².
 - New: Pivot tables (Pivot panel): rows × columns of one or two columns, summarizing a number column (sum, average, minimum, maximum, count) or counting rows, with totals; “Open as new table” turns the result into a table to save or chart. Search and filters apply.
 - Column statistics: standard deviation, variance, quartiles and range.
+- Shared with all Studio apps (shared.rs / shared.js): theme and language follow the other apps and Studio Hub (also when you switch windows), and file dialogs open in the work folder chosen in Studio Hub.
 
 ## 1.12.2 — 2026-10-11
 - Fixed: CSV files in Windows-1252 (e.g. saved by German Excel as “CSV (Trennzeichen-getrennt)”) were saved back as UTF-8 without BOM, so Excel then showed “MÃ¼ller” instead of “Müller”. CSV and TSV files now keep their encoding (Windows-1252, UTF-16 or UTF-8). If a character doesn’t fit Windows-1252, the file is saved as UTF-8 with BOM, which Excel also reads correctly, and you get a note.

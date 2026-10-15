@@ -1,6 +1,7 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod shared;
 mod engine;
 mod formula;
 mod functions;
@@ -95,8 +96,7 @@ pub fn percent_decode(raw: &str) -> String {
 
 #[tauri::command]
 async fn pick_files(app: AppHandle, filter_name: String) -> Vec<FileInfo> {
-    app.dialog()
-        .file()
+    crate::shared::file_dialog(&app)
         .add_filter(&filter_name, DATA_EXT)
         .blocking_pick_files()
         .unwrap_or_default()
@@ -159,9 +159,7 @@ async fn save_binary(app: AppHandle, request: Request<'_>) -> Result<Option<Save
             let name = header(&request, "x-name").unwrap_or_else(|| "data.csv".into());
             let filter = header(&request, "x-filter").unwrap_or_else(|| "CSV".into());
             let ext = header(&request, "x-ext").unwrap_or_else(|| "csv".into());
-            match app
-                .dialog()
-                .file()
+            match crate::shared::file_dialog(&app)
                 .set_file_name(&name)
                 .add_filter(&filter, &[ext.as_str()])
                 .blocking_save_file()
@@ -280,6 +278,8 @@ fn main() {
         .manage(xlsx::Styles::default())
         .manage(engine::Engine::default())
         .invoke_handler(tauri::generate_handler![
+            shared::shared_get,
+            shared::shared_set,
             texts,
             context_menu,
             clipboard_read,
