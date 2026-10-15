@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.13.1 — 2026-10-15
+- App icon with a picture of what the app does, like Slides and Plan Studio; the window and taskbar icon is now the same picture.
+
 ## 1.13.0 — 2026-10-15
 - New: Function plots (Chart → Function plot): up to 6 terms like `x^2 - 2x - 3`, `sin(x)`, `2,5·e^(-x)`, `|x|`, with implicit multiplication and decimal comma; zeros, turning points (maxima / minima) and the y-intercept are listed for each graph. Poles (1/x, tan) are drawn as gaps. Calculated in Rust (plot.rs).
 - New: Trend line for point charts — linear regression with its equation and R².
