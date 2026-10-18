@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.13.2 — 2026-10-18
+- Fixed: German CSV files with decimal commas and no heading row (e.g. a measurement series `0,5;1,21`) were split at the commas — the table showed “0 | 5;1 | 21”. A semicolon that divides every line evenly is now taken as the separator.
+- Fixed: a first row of only numbers was always used as column names, so the first measurement was missing from the table, statistics, charts and plots. Such a row is data now (columns A, B, …); “Header row” still switches it.
+
 ## 1.13.1 — 2026-10-15
 - App icon with a picture of what the app does, like Slides and Plan Studio; the window and taskbar icon is now the same picture.
 

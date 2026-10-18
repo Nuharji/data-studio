@@ -299,7 +299,8 @@ async function parseFile(bytes, name, job = null, path = null) {
   const m = await invoke('table_read', body, {headers});
   const fromRust = v => v && typeof v === 'object' && '$date' in v ? XFormat.fromSerial(v.$date) : v;
   const json = m.format === 'json' || m.format === 'jsonl';
-  const sheets = m.sheets.map(s => makeSheet(s.name || base, s.rows.map(r => r.map(fromRust)), true, !json));
+  // Rust says whether the first row is a header (a row of only numbers is data); "Header row" in the Table menu switches it.
+  const sheets = m.sheets.map(s => makeSheet(s.name || base, s.rows.map(r => r.map(fromRust)), s.header !== false, !json));
   return {format: m.format, sheets, encoding: m.encoding, bom: m.bom, delimiter: m.delimiter, eol: m.eol, size: m.size};
 }
 

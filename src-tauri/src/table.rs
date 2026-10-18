@@ -50,6 +50,19 @@ pub fn encode_csv(utf8: Vec<u8>, encoding: &str, bom: bool) -> Vec<u8> {
     }
 }
 
+/// Whether the first row holds column names. A first row of only numbers — measurement series without headings, as
+/// in physics or chemistry lessons — is data; anything with text in it (also "Region; 2024; 2025") stays the header.
+pub fn first_row_is_header(rows: &[Vec<Value>]) -> bool {
+    let (Some(first), true) = (rows.first(), rows.len() >= 2) else { return true };
+    let cells: Vec<&Value> = first.iter().filter(|v| !matches!(v, Value::Null) && v.as_str().is_none_or(|s| !s.trim().is_empty())).collect();
+    let number = |v: &&Value| match v {
+        Value::Number(_) => true,
+        Value::String(s) => crate::engine::to_number(s, true).is_some() || crate::engine::to_number(s, false).is_some(),
+        _ => false,
+    };
+    cells.is_empty() || !cells.iter().all(number)
+}
+
 /* ---------------- CSV ---------------- */
 
 fn csv_reader(text: &str, delim: u8) -> csv::Reader<&[u8]> {
@@ -65,10 +78,14 @@ pub fn detect_eol(text: &str) -> &'static str {
     }
 }
 
+/// The separator: one that splits (nearly) every line into the same number of fields wins, in the order tab, semicolon,
+/// comma, bar — a semicolon that does so means the commas are decimal marks ("0,5;1,21", German Excel). Without such
+/// a separator, the most regular one with the most fields.
 pub fn detect_delimiter(text: &str) -> u8 {
     let sample: String = text.lines().take(60).collect::<Vec<_>>().join("\n");
     let mut best = (b',', 0.0f64);
-    for d in [b',', b';', b'\t', b'|'] {
+    let mut steady = Vec::new();
+    for d in [b'\t', b';', b',', b'|'] {
         let counts: Vec<usize> = csv_reader(&sample, d).records().filter_map(Result::ok).filter(|r| !r.iter().all(str::is_empty)).map(|r| r.len()).collect();
         if counts.is_empty() {
             continue;
@@ -78,12 +95,13 @@ pub fn detect_delimiter(text: &str) -> u8 {
             continue;
         }
         let same = counts.iter().filter(|&&n| n as f64 == first).count() as f64 / counts.len() as f64;
+        if same >= 0.9 { steady.push(d); }
         let score = same * 100.0 + first.min(50.0);
         if score > best.1 {
             best = (d, score);
         }
     }
-    best.0
+    steady.first().copied().unwrap_or(best.0)
 }
 
 #[cfg(test)]
@@ -329,7 +347,7 @@ fn read_spreadsheet(bytes: &[u8], ext: &str) -> Result<Vec<Value>, String> {
         if !has_formulas {
             grid.retain(|r| r.iter().any(|v| v.as_str() != Some("")));
         }
-        sheets.push(json!({"name": name, "rows": grid}));
+        sheets.push(json!({"name": name, "header": first_row_is_header(&grid), "rows": grid}));
     }
     Ok(sheets)
 }
@@ -382,7 +400,8 @@ pub async fn table_read(app: tauri::AppHandle, request: Request<'_>) -> Result<V
     });
     if let Some(id) = id { use tauri::Emitter; let _ = app.emit("load-progress", json!({"id": id, "phase": "parse", "done": total, "total": total})); }
     let eol = detect_eol(&text);
-    Ok(json!({"format": format, "encoding": encoding, "bom": bom, "delimiter": (delim as char).to_string(), "eol": eol, "sheets": sheet(rows), "size": size}))
+    Ok(json!({"format": format, "encoding": encoding, "bom": bom, "delimiter": (delim as char).to_string(), "eol": eol,
+        "sheets": [{"name": base, "header": first_row_is_header(&rows), "rows": rows}], "size": size}))
 }
 
 #[derive(Deserialize)]
@@ -482,6 +501,17 @@ mod tests {
         assert_eq!(from_open_formula("of:=IF([.A1]>1;\"a;b\";0.5)"), "IF(A1>1,\"a;b\",0.5)");
     }
     #[test]
+    fn header_row_guess() {
+        let rows = |t: &str| parse_csv(t, b';');
+        assert!(!first_row_is_header(&rows("0,5;1,2\n1,0;2,3\n")), "measurements only");
+        assert!(!first_row_is_header(&rows("-3;1.5;;2e3\n1;2;3;4\n")), "signs, empty cell, exponent");
+        assert!(first_row_is_header(&rows("Zeit;Weg\n0,5;1,2\n")));
+        assert!(first_row_is_header(&rows("Region;2024;2025\nNord;1;2\n")), "text with years");
+        assert!(first_row_is_header(&rows("1;2\n")), "a single row stays as it was");
+        assert!(!first_row_is_header(&[vec![json!(1.5), json!(2)], vec![json!(3), json!(4)]]), "numbers from .ods/.xls");
+    }
+
+    #[test]
     fn encodings_round_trip() {
         let ansi = b"Name;Stadt\r\nM\xfcller;K\xf6ln \x80\r\n".to_vec();
         let (text, enc, bom) = decode(&ansi);
@@ -517,6 +547,12 @@ mod tests {
         assert_eq!(detect_delimiter("a,b\n1,2\n3,4"), b',');
         assert_eq!(detect_delimiter("a\tb\tc\n1\t2\t3"), b'\t');
         assert_eq!(detect_delimiter("Name;Preis\n\"Äpfel, rot\";1,20"), b';');
+        // German numbers without a header: the commas are decimal marks.
+        assert_eq!(detect_delimiter("0,5;1,21\n1,0;2,38\n1,5;3,62\n"), b';');
+        assert_eq!(detect_delimiter("1,5;2\n3;4,25\n"), b';');
+        // Comma files stay comma files, also with a stray semicolon in a quoted text.
+        assert_eq!(detect_delimiter("x,y\n0.5,1.21\n1.0,2.38\n"), b',');
+        assert_eq!(detect_delimiter("Name,Note\n\"A; B\",1\nC,2\n"), b',');
     }
     #[test]
     fn csv_quotes_and_empty_lines() {
