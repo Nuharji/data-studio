@@ -1245,11 +1245,12 @@ $('#props').addEventListener('change', e => { if (e.target.dataset.actCheck) run
 let chart = null;
 function chartCfg(sh) {
   if (!sh.chart) {
-    const firstNum = sh.cols.findIndex(c => c.type === 'number');
     let x = sh.cols.findIndex(c => c.type === 'text' || c.type === 'date');
-    if (x < 0) x = firstNum === 0 && sh.cols.length > 1 ? 1 : 0;
+    // Only numbers (a measurement series like time | distance): the first column is x, as in Excel, shown as points.
+    const numbersOnly = x < 0;
+    if (numbersOnly) x = 0;
     const y = sh.cols.findIndex((c, i) => c.type === 'number' && i !== x);
-    sh.chart = {type: 'bar', x, ys: y >= 0 ? [y] : [], agg: 'sum', limit: 30, trend: false, fx: 'x^2 - 2x - 3', from: -5, to: 5, deg: false};
+    sh.chart = {type: numbersOnly && y >= 0 ? 'scatter' : 'bar', x, ys: y >= 0 ? [y] : [], agg: numbersOnly ? 'none' : 'sum', limit: 30, trend: false, fx: 'x^2 - 2x - 3', from: -5, to: 5, deg: false};
   }
   return sh.chart;
 }

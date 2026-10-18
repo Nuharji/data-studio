@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.13.3 — 2026-10-18
+- Fixed: for a table of only numbers (a measurement series like “time | distance”) the chart put the second column on the x axis and the first on y — the wrong way round. The first column is x now, shown as a scatter chart without summing up equal x values, so a trend line fits straight away.
+
 ## 1.13.2 — 2026-10-18
 - Fixed: German CSV files with decimal commas and no heading row (e.g. a measurement series `0,5;1,21`) were split at the commas — the table showed “0 | 5;1 | 21”. A semicolon that divides every line evenly is now taken as the separator.
 - Fixed: a first row of only numbers was always used as column names, so the first measurement was missing from the table, statistics, charts and plots. Such a row is data now (columns A, B, …); “Header row” still switches it.

@@ -1,6 +1,6 @@
 [package]
 name = "data-studio"
-version = "1.13.2"
+version = "1.13.3"
 description = "Viewer and editor for CSV, JSON and Excel data"
 edition = "2021"
 rust-version = "1.77"
