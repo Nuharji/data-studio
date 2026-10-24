@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.14.0 — 2026-10-24
+- New: Send to Agent Studio (File menu, Ctrl+Shift+A, or right-click on cells): the table (and the selected cells) with a
+  task for Claude — Explain the data, Suggest a chart, Check for errors, Write a report (as a new Markdown file), or your
+  own task. The answer comes back as a card at the bottom right. Needs Agent Studio 0.8 or later.
+
 ## 1.13.3 — 2026-10-18
 - Fixed: for a table of only numbers (a measurement series like “time | distance”) the chart put the second column on the x axis and the first on y — the wrong way round. The first column is x now, shown as a scatter chart without summing up equal x values, so a trend line fits straight away.
 

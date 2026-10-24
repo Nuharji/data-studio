@@ -316,5 +316,15 @@
   "pivot.blank": "(empty)",
   "pivot.cut": "Only the first 500 rows and 60 columns are shown.",
   "pivot.toTable": "Open as new table",
-  "pivot.empty": "No rows to summarize."
+  "pivot.empty": "No rows to summarize.",
+  "a.sendToAgent": "Send to Agent Studio…",
+  "agent.saveFirst": "Save the table first — Agent Studio works with the file.",
+  "agent.explain": "Explain the data",
+  "agent.explainTask": "Explain the data (the selected cells, if any are sent, else the table {sheet}): what the columns mean, notable values, trends and outliers — in simple words.",
+  "agent.chart": "Suggest a chart",
+  "agent.chartTask": "Suggest which chart shows these data best (type, x and y axis, grouping) and why; name two alternatives. Data Studio can draw line, bar, pie and scatter charts.",
+  "agent.check": "Check for errors",
+  "agent.checkTask": "Check the data for errors: missing values, typos, wrong units or formats, duplicates, values that don't fit. List what you find with row and column.",
+  "agent.report": "Write a report",
+  "agent.reportTask": "Write a short report about the data in Markdown (what was measured, results with numbers, conclusion) and save it as a new file “{name} – report.md” next to the table."
 }

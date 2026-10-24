@@ -316,5 +316,15 @@
   "pivot.blank": "(leer)",
   "pivot.cut": "Es werden nur die ersten 500 Zeilen und 60 Spalten gezeigt.",
   "pivot.toTable": "Als neue Tabelle öffnen",
-  "pivot.empty": "Keine Zeilen zum Zusammenfassen."
+  "pivot.empty": "Keine Zeilen zum Zusammenfassen.",
+  "a.sendToAgent": "An Agent Studio senden…",
+  "agent.saveFirst": "Speichere die Tabelle zuerst — Agent Studio arbeitet mit der Datei.",
+  "agent.explain": "Daten erklären",
+  "agent.explainTask": "Erkläre die Daten (die markierten Zellen, wenn welche mitgeschickt werden, sonst die Tabelle {sheet}): was die Spalten bedeuten, auffällige Werte, Trends und Ausreißer — in einfachen Worten.",
+  "agent.chart": "Diagramm vorschlagen",
+  "agent.chartTask": "Schlage vor, welches Diagramm diese Daten am besten zeigt (Art, x- und y-Achse, Gruppierung) und warum; nenne zwei Alternativen. Data Studio kann Linien-, Balken-, Kreis- und Streudiagramme.",
+  "agent.check": "Auf Fehler prüfen",
+  "agent.checkTask": "Prüfe die Daten auf Fehler: fehlende Werte, Tippfehler, falsche Einheiten oder Formate, doppelte Einträge, Werte, die nicht passen. Liste auf, was du findest, mit Zeile und Spalte.",
+  "agent.report": "Bericht schreiben",
+  "agent.reportTask": "Schreibe einen kurzen Bericht über die Daten in Markdown (was gemessen wurde, Ergebnisse mit Zahlen, Fazit) und speichere ihn als neue Datei „{name} – Bericht.md“ neben der Tabelle."
 }

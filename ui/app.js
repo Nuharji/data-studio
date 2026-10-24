@@ -1663,6 +1663,19 @@ const ICONS = {
 };
 const setView = v => { settings.view = v; applySettings(); };
 const A = {
+  /* "Send to Agent Studio" (agentlink.js): the table (and the selected cells) with a task for Claude — explain the
+     data, suggest a chart, check for errors; the answer and new files come back as a card in the corner. */
+  sendToAgent: () => {
+    const d = cur(), sh = sheet(); if (!d || !sh || !window.AgentLink) return;
+    if (!d.path) { toast(t('agent.saveFirst')); return; }
+    const {r0, r1, c0, c1} = selRange(sh.sel), many = (r1 - r0 + 1) * (c1 - c0 + 1) > 1;
+    const out = many ? selectionTsv() : null, stem = d.name.replace(/\.[^.]+$/, '');
+    AgentLink.send({title: d.name, files: [d.path], selection: out && out.text.length < 200000 ? out.text : '', presets: [
+      {label: t('agent.explain'), task: t('agent.explainTask', {sheet: d.sheets.length > 1 && sh.name ? `„${sh.name}“` : ''}), level: 'read'},
+      {label: t('agent.chart'), task: t('agent.chartTask'), level: 'read'},
+      {label: t('agent.check'), task: t('agent.checkTask'), level: 'read'},
+      {label: t('agent.report'), task: t('agent.reportTask', {name: stem}), level: 'edit'}]});
+  },
   toggleAutoHide: () => { settings.autoHide = !settings.autoHide; applySettings(); },
   openFile: async () => openFiles(await pickFiles()), newTable, save, saveAs: () => exportDialog(true), exportAs: () => exportDialog(false),
   closeTab: () => closeTab(active), undo: () => undoRedo(false), redo: () => undoRedo(true),
@@ -1723,7 +1736,7 @@ const A = {
 };
 // [action, shortcut, checked(), handledElsewhere]
 const MENUS = [
-  ['file', [['openFile', 'Ctrl+O'], ['newTable', 'Alt+N'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], ['exportAs', 'Ctrl+E'], '-', ['closeTab', 'Alt+W']]],
+  ['file', [['openFile', 'Ctrl+O'], ['newTable', 'Alt+N'], '-', ['save', 'Ctrl+S'], ['saveAs', 'Ctrl+Shift+S'], ['exportAs', 'Ctrl+E'], '-', ['sendToAgent', 'Ctrl+Shift+A'], '-', ['closeTab', 'Alt+W']]],
   ['edit', [['undo', 'Ctrl+Z'], ['redo', 'Ctrl+Y'], '-', ['copy', 'Ctrl+C', null, true], ['selectAll', 'Ctrl+A', null, true], '-',
     ['editCell', 'F2', null, true], ['clearCells', 'Delete', null, true], '-', ['find', 'Ctrl+F'], ['nextIssue', 'F7']]],
   ['format', [['fmtBold', 'Ctrl+B'], ['fmtItalic', 'Ctrl+I'], ['fmtUnderline', 'Ctrl+U'], ['fmtStrike', 'Ctrl+5'], '-',
@@ -1998,7 +2011,7 @@ if (window.Native) {
       const v = rawText(sh.rows[sh.view[s.fr]][s.fc]);
       const base = [...clip, null, item('insertRow'), item('deleteRows'), null, item('insertCol'), item('deleteCol'), item('renameCol'), null,
         item('sortAsc'), item('sortDesc'), {id: 'ctx:filterValue', label: t('ctx.filterValue', {v: v ? (v.length > 28 ? v.slice(0, 28) + '…' : v) : t('ctx.emptyValue')})},
-        null, item('clearCells')];
+        null, item('clearCells'), null, item('sendToAgent')];
       const hit = spellHit(e, sh, cell);
       return hit ? spellMenu(hit).then(items => [...items, null, ...base]) : base;
     }
@@ -2052,6 +2065,11 @@ if (window.Native) {
   applyLanguage();
   booted = true;
   applySettings(); renderTabs(); renderRecent(); updateUI(); syncDisabled();
+  // Results of tasks sent to Agent Studio: tables open here, other files with the program the system uses for them.
+  if (window.AgentLink) AgentLink.init({app: 'Data Studio', lang: () => lang, open: path => {
+    if (!/\.(csv|tsv|txt|xlsx|xls|ods|json)$/i.test(path)) return false;
+    return openFileInfo({path, name: path.split(/[\\/]/).pop()});
+  }});
   if (invoke) {
     window.__TAURI__.window.getCurrentWindow().onCloseRequested(async ev => {
       saveState();
