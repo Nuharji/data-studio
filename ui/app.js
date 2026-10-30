@@ -1894,7 +1894,7 @@ function renderSettings() {
       <h3>${t('set.layout')}</h3>${sw('dock', t('set.panels'))}${sw('autoHide', t('set.autoHide'))}${sw('reopen', t('set.reopen'))}`,
     appearance: `<h3>${t('set.theme')}</h3><div class="theme-grid">` + THEMES.map(th =>
       `<button class="theme-card${settings.theme === th ? ' active' : ''}" data-theme-pick="${th}">${mock(th)}
-       <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') + `</div>`,
+       <div class="theme-name">${esc(t('theme.' + th))}<span>${settings.theme === th ? '&#10003;' : ''}</span></div></button>`).join('') + `</div>` + (window.Shared ? Shared.layoutHeading() : ''),
     table: `<h3>${t('set.numbers')}</h3><select class="wide-sel" data-sel="numLocal">${opt('raw', t('set.numRaw'), settings.numLocal ? 'local' : 'raw')}${opt('local', t('set.numLocal'), settings.numLocal ? 'local' : 'raw')}</select>
       <h3>${t('set.zoom')} <span class="val">${settings.zoom || 100} %</span></h3><input type="range" data-range="zoom" min="50" max="200" step="10" value="${settings.zoom || 100}">
       <h3>${t('set.layout')}</h3>${sw('compact', t('set.compact'))}
