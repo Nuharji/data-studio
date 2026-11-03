@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.16.1 — 2026-11-03
+- Fix (macOS): the app no longer asks again and again for access to your Documents folder (or Desktop, Downloads). The app is now signed as a whole, so macOS can remember your answer. After an update, macOS may ask once more.
+
 ## 1.16.0 — 2026-11-03
 - New: MCP server. Started with `--mcp`, Data Studio opens no window and lets Claude, ChatGPT and other MCP clients use it: `table_info`, `table_read`, `column_stats`, `write_csv`. Only .csv / .tsv files are written, an existing one only with `overwrite`. Setup: see README → MCP.
 
