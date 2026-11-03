@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod agentlink;
+mod mcp;
+mod mcp_tools;
 mod shared;
 mod engine;
 mod formula;
@@ -266,6 +268,7 @@ fn texts() -> serde_json::Value {
 }
 
 fn main() {
+    if mcp::wanted() { return mcp_tools::run(); }
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).filter(|p| is_data(p)).collect();
 
     let app = tauri::Builder::default()

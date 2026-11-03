@@ -104,7 +104,6 @@ pub fn detect_delimiter(text: &str) -> u8 {
     steady.first().copied().unwrap_or(best.0)
 }
 
-#[cfg(test)]
 pub fn parse_csv(text: &str, delim: u8) -> Vec<Vec<Value>> {
     parse_csv_progress(text, delim, |_| {})
 }
@@ -306,7 +305,7 @@ pub fn from_open_formula(s: &str) -> String {
     out
 }
 
-fn read_spreadsheet(bytes: &[u8], ext: &str) -> Result<Vec<Value>, String> {
+pub fn read_spreadsheet(bytes: &[u8], ext: &str) -> Result<Vec<Value>, String> {
     let mut sheets = Vec::new();
     for (name, values, formulas) in load_sheets(bytes, ext)? {
         // Rows and columns as in the file, starting at A1, so formula references stay right.

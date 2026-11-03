@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.16.0 — 2026-11-03
+- New: MCP server. Started with `--mcp`, Data Studio opens no window and lets Claude, ChatGPT and other MCP clients use it: `table_info`, `table_read`, `column_stats`, `write_csv`. Only .csv / .tsv files are written, an existing one only with `overwrite`. Setup: see README → MCP.
+
 ## 1.15.0 — 2026-10-30
 - New: Layouts, next to the themes (Settings → Appearance; shared by all Studio apps, any layout goes with any theme). **Adobe** is the look so far; **Modern** has rounded, floating panels and more room; **Custom** is yours: panels and tool rail left or right, density, corners, floating panels, status bar.
 
