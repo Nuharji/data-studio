@@ -25,7 +25,7 @@ const fmtSize = b => b >= 1048576 ? (b / 1048576).toLocaleString(lang, {maximumF
   : Math.max(1, Math.round(b / 1024)).toLocaleString(lang) + ' KB';
 
 /* ================= Settings & state ================= */
-const THEMES = ['dark', 'light', 'github', 'github-dark'];
+const THEMES = ['dark', 'light', 'github', 'github-dark', 'cli'];
 const DEF = {zoom: 100, keys: {}, autoHide: false, lang: 'auto', theme: 'dark', dock: true, dockTab: 'column', reopen: true, compact: false, numLocal: false, filters: false, view: 'table', spell: 'auto'};
 let settings = {...DEF}, recent = [], docs = [], active = -1, booted = false, docSeq = 0;
 const cur = () => docs[active];
@@ -142,7 +142,7 @@ function displayCell(sh, r, c) {
   return display(v, col);
 }
 /* ================= Excel formatting (see xformat.js for display, src-tauri/src/xlsx.rs for files) ================= */
-const isDarkTheme = () => settings.theme === 'dark' || settings.theme === 'github-dark';
+const isDarkTheme = () => settings.theme === 'dark' || settings.theme === 'github-dark' || settings.theme === 'cli';
 const FLAGS = ['b', 'i', 'u', 's', 'wrap'];
 /* A cell's style reference: a style id from the file, or {base: id, set: {changes}} after editing. */
 function styleOf(d, ref) {
@@ -1701,7 +1701,7 @@ const A = {
   exportChart, settings: () => openSettings(),
   langAuto: () => setPref('lang', 'auto'), langEn: () => setPref('lang', 'en'), langDe: () => setPref('lang', 'de'),
   themeDark: () => setPref('theme', 'dark'), themeLight: () => setPref('theme', 'light'),
-  themeGithub: () => setPref('theme', 'github'), themeGithubDark: () => setPref('theme', 'github-dark'),
+  themeGithub: () => setPref('theme', 'github'), themeGithubDark: () => setPref('theme', 'github-dark'), themeCli: () => setPref('theme', 'cli'),
   shortcuts: () => {
     let h = '';
     MENUS.forEach(([m, items]) => {
@@ -1751,7 +1751,7 @@ const MENUS = [
     ['langAuto', null, () => settings.lang === 'auto'], ['langEn', null, () => settings.lang === 'en'], ['langDe', null, () => settings.lang === 'de'],
     '-', '#menu.theme',
     ['themeDark', null, () => settings.theme === 'dark'], ['themeLight', null, () => settings.theme === 'light'],
-    ['themeGithub', null, () => settings.theme === 'github'], ['themeGithubDark', null, () => settings.theme === 'github-dark']]],
+    ['themeGithub', null, () => settings.theme === 'github'], ['themeGithubDark', null, () => settings.theme === 'github-dark'], ['themeCli', null, () => settings.theme === 'cli']]],
   ['help', [['functions', 'Shift+F3'], ['shortcuts'], '-', ['about']]]
 ];
 const KEYMAP = {};
@@ -1762,7 +1762,7 @@ function buildKeymap() {
 }
 buildKeymap();
 const NO_DOC = new Set(['zoomIn', 'zoomOut', 'zoomReset', 'toggleAutoHide', 'openFile', 'newTable', 'settings', 'langAuto', 'langEn', 'langDe', 'themeDark', 'themeLight', 'themeGithub',
-  'themeGithubDark', 'shortcuts', 'functions', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
+  'themeGithubDark', 'themeCli', 'shortcuts', 'functions', 'about', 'togglePanels', 'toggleCompact', 'viewTable', 'viewSplit', 'viewChart', 'toggleFilters']);
 const allowed = act => act.startsWith('fmt') ? canFormat() : !!cur() || NO_DOC.has(act);
 function run(act) { if (allowed(act)) A[act](); }
 function syncDisabled() { $$('[data-act]').forEach(b => b.disabled = !allowed(b.dataset.act)); $('#globalSearch').disabled = !cur(); }
