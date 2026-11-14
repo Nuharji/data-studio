@@ -826,11 +826,14 @@ dependencies = [
 
 [[package]]
 name = "data-studio"
-version = "1.20.0"
+version = "1.21.0"
 dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "spellbook",

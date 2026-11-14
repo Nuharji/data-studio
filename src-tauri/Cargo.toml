@@ -1,6 +1,6 @@
 [package]
 name = "data-studio"
-version = "1.20.0"
+version = "1.21.0"
 description = "Viewer and editor for CSV, JSON and Excel data"
 edition = "2021"
 rust-version = "1.77"
@@ -21,6 +21,12 @@ encoding_rs = "0.8.35"
 calamine = "0.36"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 spellbook = "0.4"
+
+# Dock icon that follows the theme (src/appicon.rs)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
 
 [profile.release]
 codegen-units = 1

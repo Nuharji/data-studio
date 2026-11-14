@@ -1,6 +1,7 @@
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod appicon;
 mod agentlink;
 mod mcp;
 mod mcp_tools;
@@ -282,6 +283,7 @@ fn main() {
         .manage(xlsx::Styles::default())
         .manage(engine::Engine::default())
         .invoke_handler(tauri::generate_handler![
+            appicon::set_dock_icon,
             shared::shared_get,
             shared::shared_set,
             agentlink::agent_send,
